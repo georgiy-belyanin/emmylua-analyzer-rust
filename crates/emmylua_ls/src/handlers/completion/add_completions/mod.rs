@@ -157,14 +157,14 @@ fn get_description(builder: &CompletionBuilder, typ: &LuaType) -> Option<String>
                 let detail = humanize_type(
                     builder.semantic_model.get_db(),
                     &rets[0].type_ref,
-                    RenderLevel::Minimal,
+                    RenderLevel::Detailed,
                 );
                 Some(detail)
             } else if rets.len() > 1 {
                 let detail = humanize_type(
                     builder.semantic_model.get_db(),
                     &rets[0].type_ref,
-                    RenderLevel::Minimal,
+                    RenderLevel::Detailed,
                 );
                 Some(format!("{} ...", detail))
             } else {
@@ -177,14 +177,14 @@ fn get_description(builder: &CompletionBuilder, typ: &LuaType) -> Option<String>
                 let detail = humanize_type(
                     builder.semantic_model.get_db(),
                     &rets[0],
-                    RenderLevel::Minimal,
+                    RenderLevel::Detailed,
                 );
                 Some(detail)
             } else if rets.len() > 1 {
                 let detail = humanize_type(
                     builder.semantic_model.get_db(),
                     &rets[0],
-                    RenderLevel::Minimal,
+                    RenderLevel::Detailed,
                 );
                 Some(format!("{} ...", detail))
             } else {
@@ -195,7 +195,7 @@ fn get_description(builder: &CompletionBuilder, typ: &LuaType) -> Option<String>
         _ => Some(humanize_type(
             builder.semantic_model.get_db(),
             typ,
-            RenderLevel::Minimal,
+            RenderLevel::Detailed,
         )),
     }
 }
