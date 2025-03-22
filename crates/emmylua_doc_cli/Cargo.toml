@@ -29,3 +29,9 @@ walkdir.workspace = true
 structopt.workspace = true
 tera.workspace = true
 include_dir.workspace = true
+
+[dependencies.uuid]
+version = "1.15.1"
+features = [
+    "v4",
+]

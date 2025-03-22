@@ -1,16 +1,18 @@
 use std::path::Path;
 
 use emmylua_code_analysis::{
-    humanize_type, DbIndex, FileId, LuaMemberKey, LuaMemberOwner, LuaPropertyOwnerId, LuaType,
+    humanize_type, DbIndex, FileId, LuaMemberKey, LuaMemberOwner, LuaPropertyOwnerId, LuaType, LuaMemberId,
     ModuleInfo, RenderLevel,
 };
 use emmylua_parser::VisibilityKind;
 use tera::{Context, Tera};
+use uuid;
 
 use crate::markdown_generator::{escape_type_name, IndexStruct, MemberDisplay};
+use serde_json;
 
 use super::{
-    render::{render_const_type, render_function_type},
+    render::{render_const_type, render_function_type, render_function_name},
     MkdocsIndex,
 };
 
@@ -46,11 +48,11 @@ pub fn generate_module_markdown(
         }
         LuaType::TableConst(t) => {
             let member_owner = LuaMemberOwner::Element(t.clone());
-            generate_member_owner_module(db, member_owner, "M", &mut context);
+            generate_member_owner_module(db, member_owner, &module.full_module_name, &mut context);
         }
         LuaType::Instance(i) => {
             let member_owner = LuaMemberOwner::Element(i.get_range().clone());
-            generate_member_owner_module(db, member_owner, "M", &mut context);
+            generate_member_owner_module(db, member_owner, &module.full_module_name, &mut context);
         }
         _ => {}
     }
@@ -63,15 +65,47 @@ pub fn generate_module_markdown(
         }
     };
 
-    let file_name = format!("{}.md", escape_type_name(&module.full_module_name));
+    let dir_name = format!("{}", escape_type_name(&module.full_module_name).replace(".", "-"));
+    let outpath = output.join(dir_name.clone());
+    match std::fs::create_dir_all(outpath) {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Failed to create dir: {}", e);
+            return None;
+        }
+    }
+    let meta_file_name = format!("{}/{}.meta.json", dir_name, escape_type_name(&module.full_module_name).replace(".", "-"));
+    let file_name = format!("{}/{}.md", dir_name, escape_type_name(&module.full_module_name).replace(".", "-"));
     mkdocs_index.modules.push(IndexStruct {
         name: module.full_module_name.clone(),
-        file: format!("modules/{}", file_name.clone()),
+        file: format!("{}", dir_name.clone()),
     });
 
     let outpath = output.join(file_name);
     println!("output module file: {}", outpath.display());
     match std::fs::write(outpath, render_text) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Failed to write file: {}", e);
+            return None;
+        }
+    }
+
+    let render_text = serde_json::json!({
+        "title": &module.full_module_name,
+        "metaTitle": &module.full_module_name,
+        "sectionTitle": &module.full_module_name,
+        "pageDescription": &module.full_module_name,
+        "shortDescription": &module.full_module_name,
+        "weight": 1,
+        "uuid": uuid::Uuid::new_v4().to_string(),
+        "createdAt": "2024-05-27T10:57:28.000Z",
+        "updatedAt": "2024-05-27T10:57:28.000Z"
+    });
+
+    let outpath = output.join(meta_file_name);
+    println!("meta output module file: {}", outpath.display());
+    match std::fs::write(outpath, render_text.to_string()) {
         Ok(_) => {}
         Err(e) => {
             eprintln!("Failed to write file: {}", e);
@@ -136,12 +170,13 @@ pub fn generate_member_owner_module(
                 _ => continue,
             };
 
-            let title_name = format!("{}.{}", owner_name, name);
+            let title_name = format!("{}.{}()", owner_name, name);
             if member_typ.is_function() {
                 let func_name = format!("{}.{}", owner_name, name);
+                let display_name = render_function_name(db, &member_typ, &func_name);
                 let display = render_function_type(db, &member_typ, &func_name, false);
                 method_members.push(MemberDisplay {
-                    name: title_name,
+                    name: display_name,
                     display,
                     description,
                 });

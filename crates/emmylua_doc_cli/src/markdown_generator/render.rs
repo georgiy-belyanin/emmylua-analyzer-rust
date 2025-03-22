@@ -47,6 +47,44 @@ pub fn render_function_type(
     }
 }
 
+pub fn render_function_name(
+    db: &DbIndex,
+    typ: &LuaType,
+    func_name: &str,
+) -> String {
+    let params_string = match typ {
+        LuaType::DocFunction(lua_func) => {
+             lua_func.get_params().iter().map(|(param_name, param_type)| {
+                if param_type.clone().map_or(false, |param_type| param_type.is_optional()) {
+                    format!("{}?", param_name)
+                } else {
+                    param_name.to_string()
+                }
+             }).collect::<Vec<String>>().join(", ")
+        }
+        LuaType::Signature(signature_id) => {
+            db.get_signature_index().get(&signature_id).map_or("".to_string(), |signature| {
+                signature.get_type_params()
+                    .iter()
+                    .map(|param| {
+                        let name = param.0.clone();
+                        if param.1.clone().map_or(false, |param_type| param_type.is_optional()) {
+                            format!("{}?", name)
+                        } else {
+                            name.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>().join(", ")
+            })
+        }
+        _ => {
+            "".to_string()
+        }
+    };
+
+    format!("{}({})", func_name, params_string)
+}
+
 fn render_doc_function_type(
     db: &DbIndex,
     lua_func: &LuaFunctionType,
