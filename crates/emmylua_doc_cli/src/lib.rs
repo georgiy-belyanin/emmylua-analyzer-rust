@@ -8,6 +8,7 @@ mod common;
 mod init;
 mod json_generator;
 mod markdown_generator;
+mod vkdoc_generator;
 
 #[allow(unused)]
 pub fn run_doc_cli(mut cmd_args: CmdArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -61,5 +62,12 @@ pub fn run_doc_cli(mut cmd_args: CmdArgs) -> Result<(), Box<dyn std::error::Erro
             cmd_args.mixin,
         ),
         Format::Json => json_generator::generate_json(&analysis, cmd_args.output),
+        Format::Vkdoc => vkdoc_generator::generate_vkdoc(
+            &analysis,
+            cmd_args.output,
+            cmd_args.override_template,
+            cmd_args.site_name,
+            cmd_args.mixin,
+        ),
     }
 }

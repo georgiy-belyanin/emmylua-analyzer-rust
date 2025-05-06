@@ -63,6 +63,7 @@ pub struct CmdArgs {
 pub enum Format {
     Json,
     Markdown,
+    Vkdoc,
 }
 
 #[allow(unused)]

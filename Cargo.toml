@@ -53,3 +53,4 @@ num-traits = { version = "0.2", features = ["std"] }
 mimalloc = "0.1.47"
 googletest = "0.14.2"
 unicode-general-category = "1.0.0"
+vkdocs-rs = "0.2.0"

@@ -146,7 +146,11 @@ fn humanize_simple_type(
     if !matches!(level, RenderLevel::Detailed | RenderLevel::Documentation) {
         return Some(name.to_string());
     }
-    let max_display_count = 12;
+    let max_display_count = if matches!(level, RenderLevel::Documentation) {
+        500
+    } else {
+        12
+    };
 
     let member_owner = LuaMemberOwner::Type(id.clone());
     let member_index = db.get_member_index();
