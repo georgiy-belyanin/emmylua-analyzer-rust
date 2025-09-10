@@ -1,6 +1,5 @@
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum VisibilityKind {
-    None,
     Public,
     Protected,
     Private,
@@ -10,14 +9,25 @@ pub enum VisibilityKind {
 
 impl VisibilityKind {
     #[allow(unused)]
-    pub fn to_visibility_kind(visibility: &str) -> VisibilityKind {
+    pub fn to_visibility_kind(visibility: &str) -> Option<VisibilityKind> {
         match visibility {
-            "public" => VisibilityKind::Public,
-            "protected" => VisibilityKind::Protected,
-            "private" => VisibilityKind::Private,
-            "internal" => VisibilityKind::Internal,
-            "package" => VisibilityKind::Package,
-            _ => VisibilityKind::None,
+            "public" => Some(VisibilityKind::Public),
+            "protected" => Some(VisibilityKind::Protected),
+            "private" => Some(VisibilityKind::Private),
+            "internal" => Some(VisibilityKind::Internal),
+            "package" => Some(VisibilityKind::Package),
+            _ => None,
+        }
+    }
+
+    #[allow(unused)]
+    pub fn to_str(&self) -> Option<&'static str> {
+        match self {
+            VisibilityKind::Public => Some("public"),
+            VisibilityKind::Protected => Some("protected"),
+            VisibilityKind::Private => Some("private"),
+            VisibilityKind::Internal => Some("internal"),
+            VisibilityKind::Package => Some("package"),
         }
     }
 }

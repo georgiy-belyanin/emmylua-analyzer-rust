@@ -3,7 +3,6 @@ mod test;
 mod types;
 
 use tag::{parse_long_tag, parse_tag};
-use types::parse_type;
 
 use crate::{
     kind::{LuaSyntaxKind, LuaTokenKind},
@@ -37,6 +36,8 @@ fn parse_docs(p: &mut LuaDocParser) {
                 p.set_state(LuaDocLexerState::NormalDescription);
                 p.bump();
 
+                if_token_bump(p, LuaTokenKind::TkWhitespace);
+
                 if matches!(
                     p.current_token(),
                     LuaTokenKind::TkDocRegion | LuaTokenKind::TkDocEndRegion
@@ -44,18 +45,13 @@ fn parse_docs(p: &mut LuaDocParser) {
                     p.bump();
                 }
 
-                parse_description(p);
+                parse_normal_description(p);
             }
             LuaTokenKind::TkLongCommentStart => {
                 p.set_state(LuaDocLexerState::LongDescription);
                 p.bump();
 
                 parse_description(p);
-            }
-            LuaTokenKind::TkDocContinueOr => {
-                p.set_state(LuaDocLexerState::Normal);
-                p.bump();
-                parse_continue_or(p);
             }
             LuaTokenKind::TKDocTriviaStart => {
                 p.bump();
@@ -107,7 +103,7 @@ fn expect_token(p: &mut LuaDocParser, token: LuaTokenKind) -> Result<(), LuaPars
         p.bump();
         Ok(())
     } else {
-        Err(LuaParseError::from_source_range(
+        Err(LuaParseError::syntax_error_from(
             &t!(
                 "expected %{token}, but get %{current}",
                 token = token,
@@ -127,20 +123,23 @@ fn if_token_bump(p: &mut LuaDocParser, token: LuaTokenKind) -> bool {
     }
 }
 
-// ---| 1
-// ---| "string"
-// ---| string.CS.AAA # HELLO
-fn parse_continue_or(p: &mut LuaDocParser) {
-    let m = p.mark(LuaSyntaxKind::DocContinueOrField);
+fn parse_normal_description(p: &mut LuaDocParser) {
+    let m = p.mark(LuaSyntaxKind::DocDescription);
 
-    match parse_type(p) {
-        Ok(_) => {}
-        Err(err) => {
-            p.push_error(err);
+    loop {
+        match p.current_token() {
+            LuaTokenKind::TkDocDetail
+            | LuaTokenKind::TkEndOfLine
+            | LuaTokenKind::TkWhitespace
+            | LuaTokenKind::TkDocContinue
+            | LuaTokenKind::TkNormalStart => {
+                p.bump();
+            }
+            _ => {
+                break;
+            }
         }
     }
 
-    p.set_state(LuaDocLexerState::Description);
-    parse_description(p);
     m.complete(p);
 }

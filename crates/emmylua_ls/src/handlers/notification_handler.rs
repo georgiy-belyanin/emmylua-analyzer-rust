@@ -1,18 +1,17 @@
-use std::{error::Error, future::Future};
+use std::error::Error;
 
-use log::error;
+use log::warn;
 use lsp_server::Notification;
 use lsp_types::{
+    CancelParams, NumberOrString,
     notification::{
         Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
-        DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
-        Notification as lsp_notification, SetTrace,
+        DidCloseTextDocument, DidOpenTextDocument, DidRenameFiles, DidSaveTextDocument,
+        Notification as LspNotification, SetTrace,
     },
-    CancelParams, NumberOrString,
 };
-use serde::de::DeserializeOwned;
 
-use crate::context::{ServerContext, ServerContextSnapshot};
+use crate::context::ServerContext;
 
 use super::{
     configuration::on_did_change_configuration,
@@ -20,107 +19,72 @@ use super::{
         on_did_change_text_document, on_did_change_watched_files, on_did_close_document,
         on_did_open_text_document, on_did_save_text_document, on_set_trace,
     },
+    workspace::on_did_rename_files_handler,
 };
+
+macro_rules! dispatch_notification {
+    ($notification:expr, $context:expr, {
+        sync: { $($sync_notif:ty => $sync_handler:expr),* $(,)? }
+        async: { $($async_notif:ty => $async_handler:expr),* $(,)? }
+    }) => {
+        match $notification.method.as_str() {
+            Cancel::METHOD => {
+                if let Ok(params) = $notification.extract::<CancelParams>(Cancel::METHOD) {
+                    handle_cancel($context, params).await;
+                }
+            }
+            $(
+                <$sync_notif>::METHOD => {
+                    if let Ok(params) = $notification.extract::<<$sync_notif as LspNotification>::Params>(<$sync_notif>::METHOD) {
+                        let snapshot = $context.snapshot();
+                        $sync_handler(snapshot, params).await;
+                    }
+                }
+            )*
+            $(
+                <$async_notif>::METHOD => {
+                    if let Ok(params) = $notification.extract::<<$async_notif as LspNotification>::Params>(<$async_notif>::METHOD) {
+                        let snapshot = $context.snapshot();
+                        tokio::spawn(async move {
+                            $async_handler(snapshot, params).await;
+                        });
+                    }
+                }
+            )*
+            method => {
+                warn!("Unhandled notification method: {}", method);
+            }
+        }
+    };
+}
 
 pub async fn on_notification_handler(
     notification: Notification,
     server_context: &mut ServerContext,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
-    NotificationDispatcher::new(notification, server_context)
-        .on_cancel()
-        .await
-        .on_sync::<DidChangeTextDocument, _, _>(on_did_change_text_document)
-        .await
-        .on_parallel::<DidOpenTextDocument, _, _>(on_did_open_text_document)
-        .on_parallel::<DidSaveTextDocument, _, _>(on_did_save_text_document)
-        .on_parallel::<DidCloseTextDocument, _, _>(on_did_close_document)
-        .on_parallel::<DidChangeWatchedFiles, _, _>(on_did_change_watched_files)
-        .on_parallel::<SetTrace, _, _>(on_set_trace)
-        .on_parallel::<DidChangeConfiguration, _, _>(on_did_change_configuration)
-        .finish();
+    dispatch_notification!(notification, server_context, {
+        sync: {
+            DidChangeTextDocument => on_did_change_text_document,
+        }
+        async: {
+            DidOpenTextDocument => on_did_open_text_document,
+            DidSaveTextDocument => on_did_save_text_document,
+            DidCloseTextDocument => on_did_close_document,
+            DidChangeWatchedFiles => on_did_change_watched_files,
+            SetTrace => on_set_trace,
+            DidChangeConfiguration => on_did_change_configuration,
+            DidRenameFiles => on_did_rename_files_handler,
+        }
+    });
 
     Ok(())
 }
 
-pub struct NotificationDispatcher<'a> {
-    notification: Option<Notification>,
-    context: &'a mut ServerContext,
-}
+async fn handle_cancel(server_context: &mut ServerContext, params: CancelParams) {
+    let req_id = match params.id {
+        NumberOrString::Number(i) => i.into(),
+        NumberOrString::String(s) => s.into(),
+    };
 
-impl<'a> NotificationDispatcher<'a> {
-    pub fn new(notification: Notification, context: &'a mut ServerContext) -> Self {
-        NotificationDispatcher {
-            notification: Some(notification),
-            context,
-        }
-    }
-
-    pub fn on_parallel<R, F, Fut>(&mut self, handler: F) -> &mut Self
-    where
-        R: lsp_types::notification::Notification + 'static,
-        R::Params: DeserializeOwned + Send + std::fmt::Debug + 'static,
-        F: Fn(ServerContextSnapshot, R::Params) -> Fut + Send + 'static,
-        Fut: Future<Output = Option<()>> + Send + 'static,
-    {
-        let notification = match &self.notification {
-            Some(req) if req.method == R::METHOD => self.notification.take().unwrap(),
-            _ => return self,
-        };
-
-        if R::METHOD == notification.method {
-            let snapshot = self.context.snapshot();
-            let m = notification.extract(R::METHOD);
-            tokio::spawn(async move {
-                handler(snapshot, m.unwrap()).await;
-            });
-        }
-        self
-    }
-
-    pub async fn on_sync<R, F, Fut>(&mut self, handler: F) -> &mut Self
-    where
-        R: lsp_types::notification::Notification + 'static,
-        R::Params: DeserializeOwned + Send + std::fmt::Debug + 'static,
-        F: Fn(ServerContextSnapshot, R::Params) -> Fut + Send + 'static,
-        Fut: Future<Output = Option<()>> + Send + 'static,
-    {
-        let notification = match &self.notification {
-            Some(req) if req.method == R::METHOD => self.notification.take().unwrap(),
-            _ => return self,
-        };
-
-        if R::METHOD == notification.method {
-            let snapshot = self.context.snapshot();
-            let m = notification.extract(R::METHOD);
-            handler(snapshot, m.unwrap()).await;
-        }
-        self
-    }
-
-    pub async fn on_cancel(&mut self) -> &mut Self {
-        let notification = match &self.notification {
-            Some(req) if req.method == Cancel::METHOD => self.notification.take().unwrap(),
-            _ => return self,
-        };
-
-        if Cancel::METHOD == notification.method {
-            let m: Result<CancelParams, _> = notification.extract(Cancel::METHOD);
-            let req_id = match m.unwrap().id {
-                NumberOrString::Number(i) => i.into(),
-                NumberOrString::String(s) => s.into(),
-            };
-
-            self.context.cancel(req_id).await;
-        }
-        self
-    }
-
-    pub fn finish(&mut self) {
-        if let Some(notification) = &self.notification {
-            error!(
-                "handler not found for notification. [{}]",
-                notification.method
-            )
-        }
-    }
+    server_context.cancel(req_id).await;
 }

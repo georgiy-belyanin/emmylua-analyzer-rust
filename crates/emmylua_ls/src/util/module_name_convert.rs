@@ -1,9 +1,12 @@
-use code_analysis::EmmyrcFilenameConvention;
+use emmylua_code_analysis::{EmmyrcFilenameConvention, LuaType, ModuleInfo};
 
-pub fn module_name_convert(name: &str, file_convension: EmmyrcFilenameConvention) -> String {
-    let mut module_name = name.to_string();
+pub fn module_name_convert(
+    module_info: &ModuleInfo,
+    file_conversion: EmmyrcFilenameConvention,
+) -> String {
+    let mut module_name = module_info.name.to_string();
 
-    match file_convension {
+    match file_conversion {
         EmmyrcFilenameConvention::SnakeCase => {
             module_name = to_snake_case(&module_name);
         }
@@ -14,9 +17,42 @@ pub fn module_name_convert(name: &str, file_convension: EmmyrcFilenameConvention
             module_name = to_pascal_case(&module_name);
         }
         EmmyrcFilenameConvention::Keep => {}
+        EmmyrcFilenameConvention::KeepClass => {
+            if let Some(export_type) = &module_info.export_type {
+                if let LuaType::Def(id) = export_type {
+                    module_name = id.get_simple_name().to_string();
+                }
+            }
+        }
     }
 
     module_name
+}
+
+pub fn key_name_convert(
+    key: &str,
+    typ: &LuaType,
+    file_conversion: EmmyrcFilenameConvention,
+) -> String {
+    let mut key_name = key.to_string();
+    match file_conversion {
+        EmmyrcFilenameConvention::SnakeCase => {
+            key_name = to_snake_case(&key_name);
+        }
+        EmmyrcFilenameConvention::CamelCase => {
+            key_name = to_camel_case(&key_name);
+        }
+        EmmyrcFilenameConvention::PascalCase => {
+            key_name = to_pascal_case(&key_name);
+        }
+        EmmyrcFilenameConvention::Keep => {}
+        EmmyrcFilenameConvention::KeepClass => {
+            if let LuaType::Def(id) = typ {
+                key_name = id.get_simple_name().to_string();
+            }
+        }
+    }
+    key_name
 }
 
 fn to_snake_case(s: &str) -> String {

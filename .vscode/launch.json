@@ -12,7 +12,7 @@
                 "args": [
                     "build",
                     "--bin=emmylua_ls",
-                    "--package=emmylua_ls"
+                    "--package=emmylua_ls",
                 ],
                 "filter": {
                     "name": "emmylua_ls",

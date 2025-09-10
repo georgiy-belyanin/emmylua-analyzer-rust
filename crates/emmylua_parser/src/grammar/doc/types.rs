@@ -1,36 +1,59 @@
 use crate::{
+    UNARY_TYPE_PRIORITY,
     grammar::ParseResult,
     kind::{LuaOpKind, LuaSyntaxKind, LuaTokenKind, LuaTypeBinaryOperator, LuaTypeUnaryOperator},
+    lexer::LuaDocLexerState,
     parser::{CompleteMarker, LuaDocParser, MarkerEventContainer},
     parser_error::LuaParseError,
 };
 
-use super::{expect_token, if_token_bump};
+use super::{expect_token, if_token_bump, parse_description};
 
 pub fn parse_type(p: &mut LuaDocParser) -> ParseResult {
-    let cm = parse_sub_type(p, 0)?;
+    if p.current_token() == LuaTokenKind::TkDocContinueOr {
+        return parse_multi_line_union_type(p);
+    }
 
-    // <type>?
-    if p.current_token() == LuaTokenKind::TkDocQuestion {
-        let m = cm.precede(p, LuaSyntaxKind::TypeNullable);
-        p.bump();
-        Ok(m.complete(p))
+    let mut cm = parse_sub_type(p, 0)?;
+
+    loop {
+        match p.current_token() {
+            // <type>?
+            LuaTokenKind::TkDocQuestion => {
+                let m = cm.precede(p, LuaSyntaxKind::TypeNullable);
+                p.bump();
+                cm = m.complete(p);
+            }
+            // <type> and <true type> or <false type>
+            LuaTokenKind::TkAnd => {
+                let m = cm.precede(p, LuaSyntaxKind::TypeConditional);
+                p.bump();
+                parse_sub_type(p, 0)?;
+                expect_token(p, LuaTokenKind::TkOr)?;
+                parse_sub_type(p, 0)?;
+                cm = m.complete(p);
+                break;
+            }
+            LuaTokenKind::TkDots => {
+                // donot support  'xxx... ...'
+                if matches!(cm.kind, LuaSyntaxKind::TypeVariadic) {
+                    break;
+                }
+
+                let m = cm.precede(p, LuaSyntaxKind::TypeVariadic);
+                p.bump();
+                cm = m.complete(p);
+                break;
+            }
+            _ => break,
+        }
     }
-    // <type> and <true type> or <false type>
-    else if p.current_token() == LuaTokenKind::TkAnd {
-        let m = cm.precede(p, LuaSyntaxKind::TypeConditional);
-        p.bump();
-        parse_sub_type(p, 0)?;
-        expect_token(p, LuaTokenKind::TkOr)?;
-        parse_sub_type(p, 0)?;
-        Ok(m.complete(p))
-    } else {
-        Ok(cm)
-    }
+
+    Ok(cm)
 }
 
 // <type>
-// keyof <type>
+// keyof <type>, -1
 // <type> | <type> , <type> & <type>, <type> extends <type>, <type> in keyof <type>
 fn parse_sub_type(p: &mut LuaDocParser, limit: i32) -> ParseResult {
     let uop = LuaOpKind::to_type_unary_operator(p.current_token());
@@ -38,10 +61,10 @@ fn parse_sub_type(p: &mut LuaDocParser, limit: i32) -> ParseResult {
         let range = p.current_token_range();
         let m = p.mark(LuaSyntaxKind::TypeUnary);
         p.bump();
-        match parse_sub_type(p, 0) {
+        match parse_sub_type(p, UNARY_TYPE_PRIORITY) {
             Ok(_) => {}
             Err(err) => {
-                p.push_error(LuaParseError::from_source_range(
+                p.push_error(LuaParseError::doc_error_from(
                     &t!("unary operator not followed by type"),
                     range,
                 ));
@@ -58,16 +81,22 @@ fn parse_sub_type(p: &mut LuaDocParser, limit: i32) -> ParseResult {
         let range = p.current_token_range();
         let m = cm.precede(p, LuaSyntaxKind::TypeBinary);
         p.bump();
-        match parse_sub_type(p, bop.get_priority().right) {
-            Ok(_) => {}
-            Err(err) => {
-                p.push_error(LuaParseError::from_source_range(
-                    &t!("binary operator not followed by type"),
-                    range,
-                ));
+        if p.current_token() != LuaTokenKind::TkDocQuestion {
+            match parse_sub_type(p, bop.get_priority().right) {
+                Ok(_) => {}
+                Err(err) => {
+                    p.push_error(LuaParseError::doc_error_from(
+                        &t!("binary operator not followed by type"),
+                        range,
+                    ));
 
-                return Err(err);
+                    return Err(err);
+                }
             }
+        } else {
+            let m2 = p.mark(LuaSyntaxKind::TypeLiteral);
+            p.bump();
+            m2.complete(p);
         }
 
         cm = m.complete(p);
@@ -98,13 +127,14 @@ fn parse_primary_type(p: &mut LuaDocParser) -> ParseResult {
         LuaTokenKind::TkLeftBrace => parse_object_or_mapped_type(p),
         LuaTokenKind::TkLeftBracket => parse_tuple_type(p),
         LuaTokenKind::TkLeftParen => parse_paren_type(p),
-        LuaTokenKind::TkString | LuaTokenKind::TkInt | LuaTokenKind::TkDocBoolean => {
-            parse_literal_type(p)
-        }
+        LuaTokenKind::TkString
+        | LuaTokenKind::TkInt
+        | LuaTokenKind::TkTrue
+        | LuaTokenKind::TkFalse => parse_literal_type(p),
         LuaTokenKind::TkName => parse_name_or_func_type(p),
         LuaTokenKind::TkStringTemplateType => parse_string_template_type(p),
         LuaTokenKind::TkDots => parse_vararg_type(p),
-        _ => Err(LuaParseError::from_source_range(
+        _ => Err(LuaParseError::doc_error_from(
             &t!("expect type"),
             p.current_token_range(),
         )),
@@ -121,11 +151,14 @@ fn parse_object_or_mapped_type(p: &mut LuaDocParser) -> ParseResult {
         parse_typed_field(p)?;
         while p.current_token() == LuaTokenKind::TkComma {
             p.bump();
+            if p.current_token() == LuaTokenKind::TkRightBrace {
+                break;
+            }
             parse_typed_field(p)?;
         }
     }
 
-    expect_token(p,LuaTokenKind::TkRightBrace)?;
+    expect_token(p, LuaTokenKind::TkRightBrace)?;
 
     Ok(m.complete(p))
 }
@@ -144,18 +177,14 @@ fn parse_typed_field(p: &mut LuaDocParser) -> ParseResult {
         }
         LuaTokenKind::TkLeftBracket => {
             p.bump();
-            if p.current_token() == LuaTokenKind::TkInt
-                || p.current_token() == LuaTokenKind::TkString
-            {
-                p.bump();
-            } else {
-                parse_type(p)?;
-            }
+
+            parse_type(p)?;
+
             expect_token(p, LuaTokenKind::TkRightBracket)?;
             if_token_bump(p, LuaTokenKind::TkDocQuestion);
         }
         _ => {
-            return Err(LuaParseError::from_source_range(
+            return Err(LuaParseError::doc_error_from(
                 &t!("expect name or [<number>] or [<string>]"),
                 p.current_token_range(),
             ));
@@ -175,7 +204,11 @@ fn parse_tuple_type(p: &mut LuaDocParser) -> ParseResult {
     let m = p.mark(LuaSyntaxKind::TypeTuple);
     p.bump();
     if p.current_token() != LuaTokenKind::TkRightBracket {
-        parse_type_list(p)?;
+        parse_type(p)?;
+        while p.current_token() == LuaTokenKind::TkComma {
+            p.bump();
+            parse_type(p)?;
+        }
     }
 
     expect_token(p, LuaTokenKind::TkRightBracket)?;
@@ -200,7 +233,7 @@ fn parse_literal_type(p: &mut LuaDocParser) -> ParseResult {
 fn parse_name_or_func_type(p: &mut LuaDocParser) -> ParseResult {
     let text = p.current_token_text();
     match text {
-        "fun" | "async" => parse_fun_type(p),
+        "fun" | "async" | "sync" => parse_fun_type(p),
         _ => parse_name_type(p),
     }
 }
@@ -209,12 +242,12 @@ fn parse_name_or_func_type(p: &mut LuaDocParser) -> ParseResult {
 // async fun ( <name>: <type>, ... ) <type>, ...
 pub fn parse_fun_type(p: &mut LuaDocParser) -> ParseResult {
     let m = p.mark(LuaSyntaxKind::TypeFun);
-    if p.current_token_text() == "async" {
+    if matches!(p.current_token_text(), "async" | "sync") {
         p.bump();
     }
 
     if p.current_token_text() != "fun" {
-        return Err(LuaParseError::from_source_range(
+        return Err(LuaParseError::doc_error_from(
             &t!("expect fun"),
             p.current_token_range(),
         ));
@@ -235,9 +268,45 @@ pub fn parse_fun_type(p: &mut LuaDocParser) -> ParseResult {
 
     if p.current_token() == LuaTokenKind::TkColon {
         p.bump();
-        parse_type_list(p)?;
+
+        // compact luals return type (number, integer)
+        parse_fun_return_list(p)?;
     }
 
+    Ok(m.complete(p))
+}
+
+fn parse_fun_return_list(p: &mut LuaDocParser) -> ParseResult {
+    let m = p.mark(LuaSyntaxKind::DocTypeList);
+    // compact luals return type (number, integer)
+    let parse_paren = if p.current_token() == LuaTokenKind::TkLeftParen {
+        p.bump();
+        true
+    } else {
+        false
+    };
+
+    parse_fun_return_type(p)?;
+
+    while p.current_token() == LuaTokenKind::TkComma {
+        p.bump();
+        parse_fun_return_type(p)?;
+    }
+
+    if parse_paren {
+        expect_token(p, LuaTokenKind::TkRightParen)?;
+    }
+
+    Ok(m.complete(p))
+}
+
+fn parse_fun_return_type(p: &mut LuaDocParser) -> ParseResult {
+    let m = p.mark(LuaSyntaxKind::DocNamedReturnType);
+    let cm = parse_type(p)?;
+    if cm.kind == LuaSyntaxKind::TypeName && p.current_token() == LuaTokenKind::TkColon {
+        p.bump();
+        parse_type(p)?;
+    }
     Ok(m.complete(p))
 }
 
@@ -254,9 +323,10 @@ fn parse_typed_param(p: &mut LuaDocParser) -> ParseResult {
         }
         LuaTokenKind::TkDots => {
             p.bump();
+            if_token_bump(p, LuaTokenKind::TkDocQuestion);
         }
         _ => {
-            return Err(LuaParseError::from_source_range(
+            return Err(LuaParseError::doc_error_from(
                 &t!("expect name or ..."),
                 p.current_token_range(),
             ));
@@ -344,20 +414,31 @@ fn parse_suffixed_type(p: &mut LuaDocParser, cm: CompleteMarker) -> ParseResult 
                 cm = m.complete(p);
                 return Ok(cm);
             }
-            LuaTokenKind::TkStringTemplateType => {
-                if only_continue_array {
-                    return Ok(cm);
-                }
-                if cm.kind != LuaSyntaxKind::TypeName {
-                    return Ok(cm);
-                }
-
-                let m = cm.precede(p, LuaSyntaxKind::TypeStringTemplate);
-                p.bump();
-                cm = m.complete(p);
-                return Ok(cm);
-            }
             _ => return Ok(cm),
         }
     }
+}
+
+fn parse_multi_line_union_type(p: &mut LuaDocParser) -> ParseResult {
+    let m = p.mark(LuaSyntaxKind::TypeMultiLineUnion);
+
+    while p.current_token() == LuaTokenKind::TkDocContinueOr {
+        p.bump();
+        parse_one_line_type(p)?;
+    }
+
+    Ok(m.complete(p))
+}
+
+fn parse_one_line_type(p: &mut LuaDocParser) -> ParseResult {
+    let m = p.mark(LuaSyntaxKind::DocOneLineField);
+
+    parse_simple_type(p)?;
+    if p.current_token() != LuaTokenKind::TkDocContinueOr {
+        p.set_state(LuaDocLexerState::Description);
+        parse_description(p);
+        p.set_state(LuaDocLexerState::Normal);
+    }
+
+    Ok(m.complete(p))
 }

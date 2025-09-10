@@ -1,7 +1,11 @@
-use crate::{kind::LuaTokenKind, parser_error::LuaParseError, LuaKind, LuaSyntaxToken};
+use crate::{
+    LuaKind, LuaSyntaxToken,
+    kind::LuaTokenKind,
+    parser_error::{LuaParseError, LuaParseErrorKind},
+};
 
 pub fn string_token_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> {
-    match LuaKind::from(token.kind()) {
+    match token.kind() {
         LuaKind::Token(LuaTokenKind::TkString) => normal_string_value(token),
         LuaKind::Token(LuaTokenKind::TkLongString) => long_string_value(token),
         _ => unreachable!(),
@@ -12,7 +16,11 @@ fn long_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> {
     let range = token.text_range();
     let text = token.text();
     if text.len() < 4 {
-        return Err(LuaParseError::new(&t!("String too short"), range));
+        return Err(LuaParseError::new(
+            LuaParseErrorKind::SyntaxError,
+            &t!("String too short"),
+            range,
+        ));
     }
 
     let mut equal_num = 0;
@@ -23,6 +31,7 @@ fn long_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> {
     if let Some((_, first_char)) = chars.next() {
         if first_char != '[' {
             return Err(LuaParseError::new(
+                LuaParseErrorKind::SyntaxError,
                 &t!(
                     "Invalid long string start, expected '[', found '%{char}'",
                     char = first_char
@@ -32,12 +41,13 @@ fn long_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> {
         }
     } else {
         return Err(LuaParseError::new(
+            LuaParseErrorKind::SyntaxError,
             &t!("Invalid long string start, expected '[', found end of input"),
             range,
         ));
     }
 
-    while let Some((idx, c)) = chars.next() {
+    for (idx, c) in chars.by_ref() {
         // calc eq num
         if c == '=' {
             equal_num += 1;
@@ -45,13 +55,18 @@ fn long_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> {
             i = idx + 1;
             break;
         } else {
-            return Err(LuaParseError::new(&t!("Invalid long string start"), range));
+            return Err(LuaParseError::new(
+                LuaParseErrorKind::SyntaxError,
+                &t!("Invalid long string start"),
+                range,
+            ));
         }
     }
 
     // check string len is enough
     if text.len() < i + equal_num + 2 {
         return Err(LuaParseError::new(
+            LuaParseErrorKind::SyntaxError,
             &t!(
                 "Invalid long string end, expected '%{eq}]'",
                 eq = "=".repeat(equal_num)
@@ -111,6 +126,7 @@ fn normal_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> 
                                 }
                             } else {
                                 return Err(LuaParseError::new(
+                                    LuaParseErrorKind::SyntaxError,
                                     &t!("Invalid hex escape sequence '\\x%{hex}'", hex = hex),
                                     token.text_range(),
                                 ));
@@ -126,6 +142,7 @@ fn normal_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> 
                                         result.push(unicode_char);
                                     } else {
                                         return Err(LuaParseError::new(
+                                            LuaParseErrorKind::SyntaxError,
                                             &t!(
                                                 "Invalid unicode escape sequence '\\u{{%{unicode_hex}}}'",
                                                 unicode_hex = unicode_hex
@@ -142,7 +159,7 @@ fn normal_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> 
                             dec.push(next_char);
                             for _ in 0..2 {
                                 if let Some(digit) = chars.peek() {
-                                    if digit.is_digit(10) {
+                                    if digit.is_ascii_digit() {
                                         dec.push(*digit);
                                     } else {
                                         break;
@@ -169,6 +186,7 @@ fn normal_string_value(token: &LuaSyntaxToken) -> Result<String, LuaParseError> 
                         }
                         _ => {
                             return Err(LuaParseError::new(
+                                LuaParseErrorKind::SyntaxError,
                                 &t!("Invalid escape sequence '\\%{char}'", char = next_char),
                                 token.text_range(),
                             ));

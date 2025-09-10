@@ -1,8 +1,7 @@
+use crate::handlers::completion::{completion_builder::CompletionBuilder, data::DOC_TAGS};
+use crate::meta_text::meta_doc_tag;
 use emmylua_parser::LuaTokenKind;
 use lsp_types::{CompletionItem, MarkupContent};
-use meta_text::meta_doc_tag;
-
-use crate::handlers::completion::{completion_builder::CompletionBuilder, data::DOC_TAGS};
 
 pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     if builder.is_cancelled() {
@@ -17,7 +16,10 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
         return None;
     }
 
-    for (sorted_index, tag) in DOC_TAGS.iter().enumerate() {
+    let emmyrc = builder.semantic_model.get_emmyrc_arc();
+    let known_other_tags = emmyrc.doc.known_tags.iter().map(|tag| tag.as_str());
+
+    for (sorted_index, tag) in DOC_TAGS.iter().copied().chain(known_other_tags).enumerate() {
         add_tag_completion(builder, sorted_index, tag);
     }
 
@@ -32,7 +34,7 @@ fn add_tag_completion(builder: &mut CompletionBuilder, sorted_index: usize, tag:
         kind: Some(lsp_types::CompletionItemKind::EVENT),
         documentation: Some(lsp_types::Documentation::MarkupContent(MarkupContent {
             kind: lsp_types::MarkupKind::Markdown,
-            value: meta_doc_tag(tag)
+            value: meta_doc_tag(tag),
         })),
         sort_text: Some(format!("{:03}", sorted_index)),
         ..Default::default()

@@ -1,4 +1,3 @@
-mod comment_trait;
 mod node;
 mod traits;
 mod tree;
@@ -7,11 +6,11 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::iter::successors;
+use std::marker::PhantomData;
 
 use rowan::{Language, TextRange, TextSize};
 
 use crate::kind::{LuaKind, LuaSyntaxKind, LuaTokenKind};
-pub use comment_trait::*;
 pub use node::*;
 pub use traits::*;
 pub use tree::{LuaSyntaxTree, LuaTreeBuilder};
@@ -77,21 +76,21 @@ impl LuaSyntaxId {
 
     pub fn from_ptr(ptr: LuaSyntaxNodePtr) -> Self {
         LuaSyntaxId {
-            kind: ptr.kind().into(),
+            kind: ptr.kind(),
             range: ptr.text_range(),
         }
     }
 
     pub fn from_node(node: &LuaSyntaxNode) -> Self {
         LuaSyntaxId {
-            kind: node.kind().into(),
+            kind: node.kind(),
             range: node.text_range(),
         }
     }
 
     pub fn from_token(token: &LuaSyntaxToken) -> Self {
         LuaSyntaxId {
-            kind: token.kind().into(),
+            kind: token.kind(),
             range: token.text_range(),
         }
     }
@@ -187,7 +186,7 @@ impl<'de> Deserialize<'de> for LuaSyntaxId {
     {
         struct LuaSyntaxIdVisitor;
 
-        impl<'de> Visitor<'de> for LuaSyntaxIdVisitor {
+        impl Visitor<'_> for LuaSyntaxIdVisitor {
             type Value = LuaSyntaxId;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -221,3 +220,34 @@ impl<'de> Deserialize<'de> for LuaSyntaxId {
         deserializer.deserialize_str(LuaSyntaxIdVisitor)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LuaAstPtr<T: LuaAstNode> {
+    pub syntax_id: LuaSyntaxId,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: LuaAstNode> LuaAstPtr<T> {
+    pub fn new(node: &T) -> Self {
+        LuaAstPtr {
+            syntax_id: node.get_syntax_id(),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn get_syntax_id(&self) -> LuaSyntaxId {
+        self.syntax_id
+    }
+
+    pub fn to_node(&self, root: &LuaChunk) -> Option<T> {
+        let syntax_node = self.syntax_id.to_node_from_root(root.syntax());
+        if let Some(node) = syntax_node {
+            T::cast(node)
+        } else {
+            None
+        }
+    }
+}
+
+unsafe impl<T: LuaAstNode> Send for LuaAstPtr<T> {}
+unsafe impl<T: LuaAstNode> Sync for LuaAstPtr<T> {}

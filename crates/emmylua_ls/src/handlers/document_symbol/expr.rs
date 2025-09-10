@@ -1,4 +1,4 @@
-use code_analysis::LuaDeclId;
+use emmylua_code_analysis::LuaDeclId;
 use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaIndexKey, LuaSyntaxKind, LuaTableExpr};
 use lsp_types::SymbolKind;
 
@@ -28,7 +28,8 @@ pub fn build_closure_expr_symbol(
     for param in param_list.get_params() {
         let decl_id = LuaDeclId::new(file_id, param.get_position());
         let decl = builder.get_decl(&decl_id)?;
-        let desc = builder.get_symbol_kind_and_detail(decl.get_type());
+        let typ = builder.get_type(decl_id.into());
+        let desc = builder.get_symbol_kind_and_detail(Some(&typ));
         let symbol = LuaSymbol::new(
             decl.get_name().to_string(),
             desc.1,

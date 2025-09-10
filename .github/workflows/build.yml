@@ -7,6 +7,7 @@ on:
     tags:
      - "*"
   pull_request:
+    types: [opened, synchronize, reopened]
     branches:
      - main
 
@@ -16,16 +17,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-20.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: general }
-          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: zigbuild, glibc: 2.17 }
-          - { os: ubuntu-22.04,   target: aarch64-unknown-linux-gnu,   platform: linux-arm64,  cross: zigbuild, glibc: 2.17 }
-          - { os: ubuntu-22.04,   target: riscv64gc-unknown-linux-gnu, platform: linux-riscv64,cross: cross }
-          - { os: ubuntu-20.04,   target: x86_64-unknown-linux-musl,   platform: linux-musl,   cross: cross }
-          - { os: macos-latest,   target: x86_64-apple-darwin,         platform: darwin-x64,   cross: general }
-          - { os: macos-latest,   target: aarch64-apple-darwin,        platform: darwin-arm64, cross: general }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: win32-x64,    cross: general }
-          - { os: windows-latest, target: i686-pc-windows-msvc,        platform: win32-ia32,   cross: general }
-          - { os: windows-latest, target: aarch64-pc-windows-msvc,     platform: win32-arm64,  cross: general }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: general,  crate: emmylua_ls }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: zigbuild, crate: emmylua_ls, glibc: 2.17 }
+          - { os: ubuntu-22.04,   target: aarch64-unknown-linux-gnu,   platform: linux-arm64,  cross: zigbuild, crate: emmylua_ls, glibc: 2.17 }
+          - { os: ubuntu-22.04,   target: riscv64gc-unknown-linux-gnu, platform: linux-riscv64,cross: cross,    crate: emmylua_ls }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-musl,   platform: linux-musl,   cross: cross,    crate: emmylua_ls }
+          - { os: macos-latest,   target: x86_64-apple-darwin,         platform: darwin-x64,   cross: general-macos-intel, crate: emmylua_ls }
+          - { os: macos-latest,   target: aarch64-apple-darwin,        platform: darwin-arm64, cross: general,  crate: emmylua_ls }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: win32-x64,    cross: general,  crate: emmylua_ls }
+          - { os: windows-latest, target: i686-pc-windows-msvc,        platform: win32-ia32,   cross: general,  crate: emmylua_ls }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc,     platform: win32-arm64,  cross: general,  crate: emmylua_ls }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: general,  crate: emmylua_check }
+          - { os: macos-latest,   target: aarch64-apple-darwin,        platform: darwin-arm64, cross: general,  crate: emmylua_check }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: win32-x64,    cross: general,  crate: emmylua_check }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: general,  crate: emmylua_doc_cli }
+          - { os: macos-latest,   target: aarch64-apple-darwin,        platform: darwin-arm64, cross: general,  crate: emmylua_doc_cli }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: win32-x64,    cross: general,  crate: emmylua_doc_cli }
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-musl,   platform: linux-musl,   cross: cross,    crate: emmylua_doc_cli }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -33,153 +41,114 @@ jobs:
           submodules: recursive
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: edit version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "current ref ${{ github.ref }}"
+          cargo run -p edit_version -- ${{ github.ref }}
       - name: Build - General
         if: ${{ matrix.cross == 'general' }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build --release --target ${{ matrix.target }}  -p emmylua_ls
+          cargo build --release --target ${{ matrix.target }}  -p ${{ matrix.crate }}
       - name: Build - cross
         if: ${{ matrix.cross == 'cross' }}
         run: |
           cargo install cross
-          cross build --release --target ${{ matrix.target }} -p emmylua_ls
+          cross build --release --target ${{ matrix.target }} -p ${{ matrix.crate }}
       - name: Build -zigbuild
         if: ${{ matrix.cross == 'zigbuild' }}
         run: |
           rustup target add ${{ matrix.target }}
           cargo install --locked cargo-zigbuild
           pip3 install ziglang
-          cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p emmylua_ls
-      - name: package-uninx
+          cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p ${{ matrix.crate }}
+      - name: Build - general macos-intel
+        if: ${{ matrix.cross == 'general-macos-intel' }}
+        run: |
+          rustup target add ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} -p ${{ matrix.crate }}
+      - name: copy-binary
         if: ${{ matrix.os != 'windows-latest'  }}
         run: |
-          python publish/workflow_copy_files.py . ${{ github.workspace }}/artifact
           mkdir -p ${{ github.workspace }}/artifact/
-          cp ${{ github.workspace }}/target/${{ matrix.target }}/release/emmylua_ls ${{ github.workspace }}/artifact/
-      - name: package-windows
+          cp ${{ github.workspace }}/target/${{ matrix.target }}/release/${{ matrix.crate }} ${{ github.workspace }}/artifact/
+      - name: copy-binary-windows
         if: ${{ matrix.os == 'windows-latest'  }}
         run: |
-          python publish/workflow_copy_files.py . "${{ github.workspace }}/artifact"
-          Copy-Item -Path ${{ github.workspace }}\target\${{ matrix.target }}\release\emmylua_ls.exe -Destination ${{ github.workspace }}\artifact\
+          mkdir -p ${{ github.workspace }}/artifact/
+          cp ${{ github.workspace }}/target/${{ matrix.target }}/release/${{ matrix.crate }}.exe ${{ github.workspace }}/artifact/
         shell: pwsh
       - name: Upload
         if: ${{ matrix.cross != 'zigbuild'  }}
-        uses: actions/upload-artifact@v3
-        with: 
-          name: emmylua_ls-${{ matrix.platform }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.crate }}-${{ matrix.platform }}
           path: ${{ github.workspace }}/artifact/
       - name: Upload zigbuild
         if: ${{ matrix.cross == 'zigbuild'  }}
-        uses: actions/upload-artifact@v3
-        with: 
-          name: emmylua_ls-${{ matrix.platform }}-glibc.${{ matrix.glibc }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.crate }}-${{ matrix.platform }}-glibc.${{ matrix.glibc }}
           path: ${{ github.workspace }}/artifact/
-  build-cli:
-      strategy:
-        fail-fast: false
-        matrix:
-          include:
-            - { os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,    platform: linux-x64,    cross: zigbuild, glibc: 2.17 }
-            - { os: ubuntu-22.04,   target: aarch64-unknown-linux-gnu,   platform: linux-arm64,  cross: zigbuild, glibc: 2.17 }
-            - { os: macos-latest,   target: x86_64-apple-darwin,         platform: darwin-x64,   cross: general }
-            - { os: macos-latest,   target: aarch64-apple-darwin,        platform: darwin-arm64, cross: general }
-            - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: win32-x64,    cross: general }
-      runs-on: ${{ matrix.os }}
-      steps:
-        - uses: actions/checkout@v4
-          with:
-            submodules: recursive
-        - name: Install Rust toolchain
-          uses: dtolnay/rust-toolchain@stable
-        - name: Build - General
-          if: ${{ matrix.cross == 'general' }}
-          run: |
-            rustup target add ${{ matrix.target }}
-            cargo build --release --target ${{ matrix.target }}  -p emmylua_doc_cli
-        - name: Build - cross
-          if: ${{ matrix.cross == 'cross' }}
-          run: |
-            cargo install cross
-            cross build --release --target ${{ matrix.target }} -p emmylua_doc_cli
-        - name: Build -zigbuild
-          if: ${{ matrix.cross == 'zigbuild' }}
-          run: |
-            rustup target add ${{ matrix.target }}
-            cargo install --locked cargo-zigbuild
-            pip3 install ziglang
-            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p emmylua_doc_cli
-        - name: package-uninx
-          if: ${{ matrix.os != 'windows-latest'  }}
-          run: |
-            python publish/workflow_copy_files.py . ${{ github.workspace }}/artifact
-            mkdir -p ${{ github.workspace }}/artifact/
-            cp ${{ github.workspace }}/target/${{ matrix.target }}/release/emmylua_doc_cli ${{ github.workspace }}/artifact/
-        - name: package-windows
-          if: ${{ matrix.os == 'windows-latest'  }}
-          run: |
-            python publish/workflow_copy_files.py . "${{ github.workspace }}/artifact"
-            Copy-Item -Path ${{ github.workspace }}\target\${{ matrix.target }}\release\emmylua_doc_cli.exe -Destination ${{ github.workspace }}\artifact\
-          shell: pwsh
-        - name: Upload
-          if: ${{ matrix.cross != 'zigbuild'  }}
-          uses: actions/upload-artifact@v3
-          with: 
-            name: emmylua_doc_cli-${{ matrix.platform }}
-            path: ${{ github.workspace }}/artifact/
-        - name: Upload zigbuild
-          if: ${{ matrix.cross == 'zigbuild'  }}
-          uses: actions/upload-artifact@v3
-          with: 
-            name: emmylua_doc_cli-${{ matrix.platform }}-glibc.${{ matrix.glibc }}
-            path: ${{ github.workspace }}/artifact/
   release:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download
-        uses: actions/download-artifact@v3
-      - name: zip windows package win32-x64
-        uses: TheDoctor0/zip-release@v0.2.1
-        with:
-          filename: emmylua_ls-win32-x64.zip
-          path: emmylua_ls-win32-x64
-      - name: zip windows package win32-ia32
-        uses: TheDoctor0/zip-release@v0.2.1
-        with:
-          filename: emmylua_ls-win32-ia32.zip
-          path: emmylua_ls-win32-ia32
-      - name: zip windows package win32-arm64
-        uses: TheDoctor0/zip-release@v0.2.1
-        with:
-          filename: emmylua_ls-win32-arm64.zip
-          path: emmylua_ls-win32-arm64
-      - name: tar unix
+        uses: actions/download-artifact@v4
+      - name: add execute permission and compress
         run: |
           chmod +x emmylua_ls-linux-x64/emmylua_ls
-          tar -czf emmylua_ls-linux-x64.tar.gz -C emmylua_ls-linux-x64 .
           chmod +x emmylua_ls-linux-x64-glibc.2.17/emmylua_ls
-          tar -czf emmylua_ls-linux-x64-glibc.2.17.tar.gz -C emmylua_ls-linux-x64-glibc.2.17 .
           chmod +x emmylua_ls-linux-arm64-glibc.2.17/emmylua_ls
-          tar -czf emmylua_ls-linux-aarch64-glibc.2.17.tar.gz -C emmylua_ls-linux-arm64-glibc.2.17 .
           chmod +x emmylua_ls-linux-musl/emmylua_ls
-          tar -czf emmylua_ls-linux-musl.tar.gz  -C emmylua_ls-linux-musl .
           chmod +x emmylua_ls-linux-riscv64/emmylua_ls
-          tar -czf emmylua_ls-linux-riscv64.tar.gz  -C emmylua_ls-linux-riscv64 .
           chmod +x emmylua_ls-darwin-x64/emmylua_ls
-          tar -czf emmylua_ls-darwin-x64.tar.gz  -C emmylua_ls-darwin-x64 .
           chmod +x emmylua_ls-darwin-arm64/emmylua_ls
-          tar -czf emmylua_ls-darwin-arm64.tar.gz  -C emmylua_ls-darwin-arm64 .
+          chmod +x emmylua_check-linux-x64/emmylua_check
+          chmod +x emmylua_check-darwin-arm64/emmylua_check
+          chmod +x emmylua_doc_cli-linux-x64/emmylua_doc_cli
+          chmod +x emmylua_doc_cli-darwin-arm64/emmylua_doc_cli
+          chmod +x emmylua_doc_cli-linux-musl/emmylua_doc_cli
+
+          tar -zcvf emmylua_ls-linux-x64.tar.gz -C emmylua_ls-linux-x64 emmylua_ls
+          tar -zcvf emmylua_ls-linux-x64-glibc.2.17.tar.gz -C emmylua_ls-linux-x64-glibc.2.17 emmylua_ls
+          tar -zcvf emmylua_ls-linux-aarch64-glibc.2.17.tar.gz -C emmylua_ls-linux-arm64-glibc.2.17 emmylua_ls
+          tar -zcvf emmylua_ls-linux-musl.tar.gz -C emmylua_ls-linux-musl emmylua_ls
+          tar -zcvf emmylua_ls-linux-riscv64.tar.gz -C emmylua_ls-linux-riscv64 emmylua_ls
+          tar -zcvf emmylua_ls-darwin-x64.tar.gz -C emmylua_ls-darwin-x64 emmylua_ls
+          tar -zcvf emmylua_ls-darwin-arm64.tar.gz -C emmylua_ls-darwin-arm64 emmylua_ls
+          tar -zcvf emmylua_check-linux-x64.tar.gz -C emmylua_check-linux-x64 emmylua_check
+          tar -zcvf emmylua_doc_cli-linux-x64.tar.gz -C emmylua_doc_cli-linux-x64 emmylua_doc_cli
+          tar -zcvf emmylua_check-darwin-arm64.tar.gz -C emmylua_check-darwin-arm64 emmylua_check
+          tar -zcvf emmylua_doc_cli-darwin-arm64.tar.gz -C emmylua_doc_cli-darwin-arm64 emmylua_doc_cli
+          tar -zcvf emmylua_doc_cli-linux-musl.tar.gz -C emmylua_doc_cli-linux-musl emmylua_doc_cli
+      - name: windows compress
+        run: |
+          cd emmylua_ls-win32-x64
+          7z a emmylua_ls-win32-x64.zip emmylua_ls.exe
+          cd ../emmylua_ls-win32-ia32
+          7z a emmylua_ls-win32-ia32.zip emmylua_ls.exe
+          cd ../emmylua_ls-win32-arm64
+          7z a emmylua_ls-win32-arm64.zip emmylua_ls.exe
+          cd ../emmylua_check-win32-x64
+          7z a emmylua_check-win32-x64.zip emmylua_check.exe
+          cd ../emmylua_doc_cli-win32-x64
+          7z a emmylua_doc_cli-win32-x64.zip emmylua_doc_cli.exe
       - name: Release
         uses: softprops/action-gh-release@v2
-        with: 
+        with:
           name: emmylua_ls
           draft: false
           generate_release_notes: true
           files: |
-            emmylua_ls-win32-x64.zip
-            emmylua_ls-win32-ia32.zip
-            emmylua_ls-win32-arm64.zip
+            emmylua_ls-win32-x64/emmylua_ls-win32-x64.zip
+            emmylua_ls-win32-ia32/emmylua_ls-win32-ia32.zip
+            emmylua_ls-win32-arm64/emmylua_ls-win32-arm64.zip
+            emmylua_check-win32-x64/emmylua_check-win32-x64.zip
+            emmylua_doc_cli-win32-x64/emmylua_doc_cli-win32-x64.zip
             emmylua_ls-linux-x64.tar.gz
             emmylua_ls-linux-x64-glibc.2.17.tar.gz
             emmylua_ls-linux-aarch64-glibc.2.17.tar.gz
@@ -187,4 +156,10 @@ jobs:
             emmylua_ls-linux-riscv64.tar.gz
             emmylua_ls-darwin-x64.tar.gz
             emmylua_ls-darwin-arm64.tar.gz
+            emmylua_check-linux-x64.tar.gz
+            emmylua_doc_cli-linux-x64.tar.gz
+            emmylua_check-darwin-arm64.tar.gz
+            emmylua_doc_cli-darwin-arm64.tar.gz
+            emmylua_doc_cli-linux-musl.tar.gz
+
           token: ${{ secrets.RELEASE }}

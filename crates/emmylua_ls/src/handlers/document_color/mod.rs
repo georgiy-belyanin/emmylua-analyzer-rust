@@ -3,11 +3,14 @@ mod build_color;
 use build_color::{build_colors, convert_color_to_hex};
 use emmylua_parser::LuaAstNode;
 use lsp_types::{
-    ClientCapabilities, ColorInformation, ColorPresentation, ColorPresentationParams, ColorProviderCapability, DocumentColorParams, ServerCapabilities, TextEdit
+    ClientCapabilities, ColorInformation, ColorPresentation, ColorPresentationParams,
+    ColorProviderCapability, DocumentColorParams, ServerCapabilities, TextEdit,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ServerContextSnapshot;
+
+use super::RegisterCapabilities;
 
 pub async fn on_document_color(
     context: ServerContextSnapshot,
@@ -15,7 +18,7 @@ pub async fn on_document_color(
     _: CancellationToken,
 ) -> Vec<ColorInformation> {
     let uri = params.text_document.uri;
-    let analysis = context.analysis.read().await;
+    let analysis = context.analysis().read().await;
     let file_id = if let Some(file_id) = analysis.get_file_id(&uri) {
         file_id
     } else {
@@ -44,7 +47,7 @@ pub async fn on_document_color_presentation(
     _: CancellationToken,
 ) -> Vec<ColorPresentation> {
     let uri = params.text_document.uri;
-    let analysis = context.analysis.read().await;
+    let analysis = context.analysis().read().await;
     let file_id = if let Some(file_id) = analysis.get_file_id(&uri) {
         file_id
     } else {
@@ -79,10 +82,10 @@ pub async fn on_document_color_presentation(
     color_presentations
 }
 
-pub fn register_capabilities(
-    server_capabilities: &mut ServerCapabilities,
-    _: &ClientCapabilities,
-) -> Option<()> {
-    server_capabilities.color_provider = Some(ColorProviderCapability::Simple(true));
-    Some(())
+pub struct DocumentColorCapabilities;
+
+impl RegisterCapabilities for DocumentColorCapabilities {
+    fn register_capabilities(server_capabilities: &mut ServerCapabilities, _: &ClientCapabilities) {
+        server_capabilities.color_provider = Some(ColorProviderCapability::Simple(true));
+    }
 }

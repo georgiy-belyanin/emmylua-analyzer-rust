@@ -1,17 +1,22 @@
+mod call_hierarchy;
 mod code_actions;
 mod code_lens;
 mod command;
 mod completion;
-mod defination;
+mod configuration;
+mod definition;
 mod document_color;
 mod document_formatting;
 mod document_highlight;
 mod document_link;
+mod document_range_formatting;
 mod document_selection_range;
 mod document_symbol;
+mod document_type_format;
 mod emmy_annotator;
 mod fold_range;
 mod hover;
+mod implementation;
 mod initialized;
 mod inlay_hint;
 mod inline_values;
@@ -23,48 +28,70 @@ mod response_handler;
 mod semantic_token;
 mod signature_helper;
 mod text_document;
+mod workspace;
 mod workspace_symbol;
-mod document_range_formatting;
-mod configuration;
 
-pub use initialized::initialized_handler;
-pub use initialized::{init_analysis, ClientConfig};
+#[cfg(test)]
+mod test;
+#[cfg(test)]
+mod test_lib;
+
+pub use initialized::{ClientConfig, init_analysis, initialized_handler};
 use lsp_types::{ClientCapabilities, ServerCapabilities};
 pub use notification_handler::on_notification_handler;
-pub use request_handler::on_req_handler;
+pub use request_handler::on_request_handler;
 pub use response_handler::on_response_handler;
 
-pub fn server_capabilities(client_capabilities: &ClientCapabilities) -> ServerCapabilities {
-    let mut server_capabilities = ServerCapabilities::default();
-    macro_rules! capabilities {
-        ($module:ident) => {
-            $module::register_capabilities(&mut server_capabilities, &client_capabilities);
-        };
-    }
-
-    capabilities!(text_document);
-    capabilities!(document_symbol);
-    capabilities!(document_color);
-    capabilities!(document_link);
-    capabilities!(document_selection_range);
-    capabilities!(document_highlight);
-    capabilities!(document_formatting);
-    capabilities!(document_range_formatting);
-    capabilities!(completion);
-    capabilities!(inlay_hint);
-    capabilities!(defination);
-    capabilities!(references);
-    capabilities!(rename);
-    capabilities!(code_lens);
-    capabilities!(signature_helper);
-    capabilities!(hover);
-    capabilities!(fold_range);
-    capabilities!(semantic_token);
-    capabilities!(command);
-    capabilities!(code_actions);
-    capabilities!(inline_values);
-    capabilities!(workspace_symbol);
-    capabilities!(configuration);
-
-    server_capabilities
+pub trait RegisterCapabilities {
+    fn register_capabilities(
+        server_capabilities: &mut ServerCapabilities,
+        client_capabilities: &ClientCapabilities,
+    );
 }
+
+macro_rules! capabilities {
+    // module name => capability type mapping
+    (modules: {
+        $($module:ident => $capability:ident),* $(,)?
+    }) => {
+        pub fn server_capabilities(client_capabilities: &ClientCapabilities) -> ServerCapabilities {
+            let mut server_capabilities = ServerCapabilities::default();
+
+            $(
+                $module::$capability::register_capabilities(&mut server_capabilities, client_capabilities);
+            )*
+
+            server_capabilities
+        }
+    };
+}
+
+capabilities!(modules: {
+    text_document => TextDocumentCapabilities,
+    document_symbol => DocumentSymbolCapabilities,
+    document_color => DocumentColorCapabilities,
+    document_link => DocumentLinkCapabilities,
+    document_selection_range => DocumentSelectionRangeCapabilities,
+    document_highlight => DocumentHighlightCapabilities,
+    document_formatting => DocumentFormattingCapabilities,
+    document_range_formatting => DocumentRangeFormattingCapabilities,
+    // document_type_format => DocumentTypeFormattingCapabilities,
+    completion => CompletionCapabilities,
+    inlay_hint => InlayHintCapabilities,
+    definition => DefinitionCapabilities,
+    implementation => ImplementationCapabilities,
+    references => ReferencesCapabilities,
+    rename => RenameCapabilities,
+    code_lens => CodeLensCapabilities,
+    signature_helper => SignatureHelperCapabilities,
+    hover => HoverCapabilities,
+    fold_range => FoldRangeCapabilities,
+    semantic_token => SemanticTokenCapabilities,
+    command => CommandCapabilities,
+    code_actions => CodeActionsCapabilities,
+    inline_values => InlineValuesCapabilities,
+    workspace_symbol => WorkspaceSymbolCapabilities,
+    configuration => ConfigurationCapabilities,
+    call_hierarchy => CallHierarchyCapabilities,
+    workspace => WorkspaceCapabilities,
+});

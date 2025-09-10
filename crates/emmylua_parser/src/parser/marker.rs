@@ -14,7 +14,7 @@ pub enum MarkEvent {
         range: SourceRange,
     },
     NodeEnd,
-    Trivia
+    Trivia,
 }
 
 impl MarkEvent {
@@ -80,34 +80,33 @@ impl Marker {
             }
             return CompleteMarker {
                 start: 0,
-                finish: 0,
                 kind: LuaSyntaxKind::None,
             };
         }
         p.push_node_end();
         CompleteMarker {
             start: self.position,
-            finish,
             kind,
         }
     }
 
-    #[allow(unused)]
-    pub fn undo<P: MarkerEventContainer>(self, p: &mut P) {
+    pub fn undo<P: MarkerEventContainer>(self, p: &mut P) -> CompleteMarker {
         match &mut p.get_events()[self.position] {
             MarkEvent::NodeStart { kind, .. } => {
                 *kind = LuaSyntaxKind::None;
             }
             _ => unreachable!(),
         }
+
+        CompleteMarker {
+            start: self.position,
+            kind: LuaSyntaxKind::None,
+        }
     }
 }
 
 pub(crate) struct CompleteMarker {
-    #[allow(unused)]
-    pub start: usize,
-    #[allow(unused)]
-    pub finish: usize,
+    start: usize,
     pub kind: LuaSyntaxKind,
 }
 
@@ -125,8 +124,11 @@ impl CompleteMarker {
     pub fn empty() -> Self {
         CompleteMarker {
             start: 0,
-            finish: 0,
             kind: LuaSyntaxKind::None,
         }
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        self.kind == LuaSyntaxKind::None
     }
 }

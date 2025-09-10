@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use code_analysis::{file_path_to_uri, DbIndex, Emmyrc, LuaDocument};
+use emmylua_code_analysis::{DbIndex, Emmyrc, LuaDocument, file_path_to_uri};
 use emmylua_parser::{
-    LuaAstNode, LuaAstToken, LuaCallArgList, LuaCallExpr, LuaExpr, LuaLiteralExpr, LuaStringToken,
+    LuaAstNode, LuaAstToken, LuaCallArgList, LuaCallExpr, LuaLiteralExpr, LuaStringToken,
     LuaSyntaxNode,
 };
 use lsp_types::DocumentLink;
@@ -33,7 +33,7 @@ fn try_build_file_link(
     result: &mut Vec<DocumentLink>,
     emmyrc: &Emmyrc,
 ) -> Option<()> {
-    if is_require_path(token.clone(), emmyrc).unwrap_or(false) {
+    if is_require_path(token.clone()).unwrap_or(false) {
         try_build_module_link(db, token, document, result);
         return Some(());
     }
@@ -103,25 +103,11 @@ fn try_build_module_link(
     Some(())
 }
 
-pub fn is_require_path(token: LuaStringToken, emmyrc: &Emmyrc) -> Option<bool> {
-    let call_expr_prefix = token
+pub fn is_require_path(token: LuaStringToken) -> Option<bool> {
+    let call_expr = token
         .get_parent::<LuaLiteralExpr>()?
         .get_parent::<LuaCallArgList>()?
-        .get_parent::<LuaCallExpr>()?
-        .get_prefix_expr()?;
+        .get_parent::<LuaCallExpr>()?;
 
-    if let LuaExpr::NameExpr(name_expr) = call_expr_prefix {
-        let name = name_expr.get_name_text()?;
-        if name == "require" {
-            return Some(true);
-        }
-
-        for require_like_function in &emmyrc.runtime.require_like_function {
-            if name == *require_like_function {
-                return Some(true);
-            }
-        }
-    }
-
-    Some(false)
+    Some(call_expr.is_require())
 }

@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
-use code_analysis::{DbIndex, LuaDeclId, LuaDocument, SemanticModel};
-use emmylua_parser::{
-    LuaAst, LuaAstNode, LuaAstToken, LuaForRangeStat, LuaForStat, LuaLocalFuncStat, LuaLocalStat,
-    LuaNameExpr, LuaParamList,
-};
-use rowan::TextRange;
-
 use super::{EmmyAnnotator, EmmyAnnotatorType};
+use crate::util::parse_desc;
+use emmylua_code_analysis::{DbIndex, LuaDeclId, LuaDocument, SemanticModel, WorkspaceId};
+use emmylua_parser::{
+    LuaAst, LuaAstNode, LuaAstToken, LuaDocDescription, LuaForRangeStat, LuaForStat,
+    LuaLocalFuncStat, LuaLocalStat, LuaNameExpr, LuaParamList,
+};
+use emmylua_parser_desc::DescItemKind;
+use rowan::TextRange;
 
 pub fn build_annotators(semantic: &SemanticModel) -> Vec<EmmyAnnotator> {
     let mut result = vec![];
@@ -15,6 +16,10 @@ pub fn build_annotators(semantic: &SemanticModel) -> Vec<EmmyAnnotator> {
     let root = semantic.get_root();
     let db = semantic.get_db();
     let mut use_range_set = HashSet::new();
+    let is_rendering_description = semantic
+        .get_emmyrc()
+        .semantic_tokens
+        .render_documentation_markup;
     for node in root.descendants::<LuaAst>() {
         match node {
             LuaAst::LuaLocalStat(local_stat) => {
@@ -59,6 +64,16 @@ pub fn build_annotators(semantic: &SemanticModel) -> Vec<EmmyAnnotator> {
             LuaAst::LuaNameExpr(name_expr) => {
                 build_name_expr_annotator(&document, &mut use_range_set, &mut result, name_expr);
             }
+            LuaAst::LuaDocDescription(description) => {
+                if is_rendering_description {
+                    build_description_annotator(
+                        &semantic,
+                        &mut use_range_set,
+                        &mut result,
+                        description,
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -89,15 +104,17 @@ fn build_local_stat_annotator(
 
         let decl_id = LuaDeclId::new(file_id, local_name.get_position());
         let reference_index = db.get_reference_index();
-        let ref_ranges = reference_index.get_local_references(&file_id, &decl_id);
-        if let Some(ref_ranges) = ref_ranges {
-            for range in ref_ranges {
-                use_range_set.insert(*range);
-                if reference_index.is_write_range(file_id, *range) {
+        let ref_ranges = reference_index.get_decl_references(&file_id, &decl_id);
+        if let Some(decl_refs) = ref_ranges {
+            for decl_ref in &decl_refs.cells {
+                use_range_set.insert(decl_ref.range.clone());
+                if decl_ref.is_write {
                     annotator.typ = EmmyAnnotatorType::MutLocal
                 }
 
-                annotator.ranges.push(document.to_lsp_range(*range)?);
+                annotator
+                    .ranges
+                    .push(document.to_lsp_range(decl_ref.range)?);
             }
         }
 
@@ -129,15 +146,17 @@ fn build_params_annotator(
 
         let decl_id = LuaDeclId::new(file_id, param_name.get_position());
         let reference_index = db.get_reference_index();
-        let ref_ranges = reference_index.get_local_references(&file_id, &decl_id);
-        if let Some(ref_ranges) = ref_ranges {
-            for range in ref_ranges {
-                use_range_set.insert(*range);
-                if reference_index.is_write_range(file_id, *range) {
+        let ref_ranges = reference_index.get_decl_references(&file_id, &decl_id);
+        if let Some(decl_refs) = ref_ranges {
+            for decl_ref in &decl_refs.cells {
+                use_range_set.insert(decl_ref.range.clone());
+                if decl_ref.is_write {
                     annotator.typ = EmmyAnnotatorType::MutParam
                 }
 
-                annotator.ranges.push(document.to_lsp_range(*range)?);
+                annotator
+                    .ranges
+                    .push(document.to_lsp_range(decl_ref.range)?);
             }
         }
 
@@ -198,11 +217,13 @@ fn build_for_stat_annotator(
     let decl_id = LuaDeclId::new(file_id, name_token.get_position());
     let ref_ranges = db
         .get_reference_index()
-        .get_local_references(&file_id, &decl_id);
-    if let Some(ref_ranges) = ref_ranges {
-        for range in ref_ranges {
-            use_range_set.insert(*range);
-            annotator.ranges.push(document.to_lsp_range(*range)?);
+        .get_decl_references(&file_id, &decl_id);
+    if let Some(decl_refs) = ref_ranges {
+        for decl_ref in &decl_refs.cells {
+            use_range_set.insert(decl_ref.range.clone());
+            annotator
+                .ranges
+                .push(document.to_lsp_range(decl_ref.range.clone())?);
         }
     }
 
@@ -233,11 +254,13 @@ fn build_for_range_annotator(
         let decl_id = LuaDeclId::new(file_id, name_token.get_position());
         let ref_ranges = db
             .get_reference_index()
-            .get_local_references(&file_id, &decl_id);
-        if let Some(ref_ranges) = ref_ranges {
-            for range in ref_ranges {
-                use_range_set.insert(*range);
-                annotator.ranges.push(document.to_lsp_range(*range)?);
+            .get_decl_references(&file_id, &decl_id);
+        if let Some(decl_refs) = ref_ranges {
+            for decl_ref in &decl_refs.cells {
+                use_range_set.insert(decl_ref.range.clone());
+                annotator
+                    .ranges
+                    .push(document.to_lsp_range(decl_ref.range.clone())?);
             }
         }
 
@@ -269,15 +292,67 @@ fn build_local_func_stat_annotator(
     let decl_id = LuaDeclId::new(file_id, name_token.get_position());
     let ref_ranges = db
         .get_reference_index()
-        .get_local_references(&file_id, &decl_id);
-    if let Some(ref_ranges) = ref_ranges {
-        for range in ref_ranges {
-            use_range_set.insert(*range);
-            annotator.ranges.push(document.to_lsp_range(*range)?);
+        .get_decl_references(&file_id, &decl_id);
+    if let Some(decl_refs) = ref_ranges {
+        for decl_ref in &decl_refs.cells {
+            use_range_set.insert(decl_ref.range.clone());
+            annotator
+                .ranges
+                .push(document.to_lsp_range(decl_ref.range.clone())?);
         }
     }
 
     result.push(annotator);
+
+    Some(())
+}
+
+fn build_description_annotator(
+    semantic_model: &SemanticModel,
+    use_range_set: &mut HashSet<TextRange>,
+    result: &mut Vec<EmmyAnnotator>,
+    description: LuaDocDescription,
+) -> Option<()> {
+    let document = semantic_model.get_document();
+    let text = document.get_text();
+    let items = parse_desc(
+        semantic_model
+            .get_module()
+            .map(|m| m.workspace_id)
+            .unwrap_or(WorkspaceId::MAIN),
+        semantic_model.get_emmyrc(),
+        text,
+        description,
+        None,
+    );
+
+    let mut strong = EmmyAnnotator {
+        typ: EmmyAnnotatorType::DocStrong,
+        ranges: vec![],
+    };
+    let mut em = EmmyAnnotator {
+        typ: EmmyAnnotatorType::DocEm,
+        ranges: vec![],
+    };
+
+    for item in items {
+        match item.kind {
+            DescItemKind::Em => {
+                use_range_set.insert(item.range.clone());
+                em.ranges.push(document.to_lsp_range(item.range.clone())?);
+            }
+            DescItemKind::Strong => {
+                use_range_set.insert(item.range.clone());
+                strong
+                    .ranges
+                    .push(document.to_lsp_range(item.range.clone())?);
+            }
+            _ => {}
+        }
+    }
+
+    result.push(em);
+    result.push(strong);
 
     Some(())
 }

@@ -1,4 +1,3 @@
-
 use lsp_types::CompletionItemKind;
 
 pub struct KeywordCompletionInfo {
@@ -112,8 +111,8 @@ pub const KEYWORD_COMPLETIONS: &[KeywordCompletionInfo] = &[
     },
     KeywordCompletionInfo {
         label: "function",
-        detail: " (function name(...) .. end)",
-        insert_text: "function ${1:name}(${2:...})\n\t${0}\nend",
+        detail: " name(...) .. end",
+        insert_text: "function ${1:name}(${2:})\n\t${0}\nend",
         kind: CompletionItemKind::SNIPPET,
     },
     KeywordCompletionInfo {
@@ -124,8 +123,8 @@ pub const KEYWORD_COMPLETIONS: &[KeywordCompletionInfo] = &[
     },
     KeywordCompletionInfo {
         label: "local function",
-        detail: " (local function name(...) .. end)",
-        insert_text: "local function ${1:name}(${2:...})\n\t${0}\nend",
+        detail: " name(...) .. end",
+        insert_text: "local function ${1:name}(${2:})\n\t${0}\nend",
         kind: CompletionItemKind::SNIPPET,
     },
     KeywordCompletionInfo {
@@ -175,8 +174,8 @@ pub const KEYWORD_EXPR_COMPLETIONS: &[KeywordCompletionInfo] = &[
     },
     KeywordCompletionInfo {
         label: "function",
-        detail: "(function (...) .. end)",
-        insert_text: "function(${1:...})\n\t${0}\nend",
+        detail: "(...) .. end",
+        insert_text: "function(${1:})\n\t${0}\nend",
         kind: CompletionItemKind::SNIPPET,
     },
     KeywordCompletionInfo {
@@ -184,5 +183,5 @@ pub const KEYWORD_EXPR_COMPLETIONS: &[KeywordCompletionInfo] = &[
         detail: "(a and b or c)",
         insert_text: "${1:a} and ${2:b} or ${3:c}",
         kind: CompletionItemKind::SNIPPET,
-    }
+    },
 ];

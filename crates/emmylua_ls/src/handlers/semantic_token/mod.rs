@@ -1,8 +1,11 @@
 mod build_semantic_tokens;
+mod function_string_highlight;
+mod language_injector;
 mod semantic_token_builder;
 
-use crate::context::ServerContextSnapshot;
+use crate::context::{ClientId, ServerContextSnapshot};
 use build_semantic_tokens::build_semantic_tokens;
+use emmylua_code_analysis::{EmmyLuaAnalysis, FileId};
 use lsp_types::{
     ClientCapabilities, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
     SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
@@ -11,7 +14,7 @@ use lsp_types::{
 pub use semantic_token_builder::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use tokio_util::sync::CancellationToken;
 
-static mut SEMANTIC_MULTILINE_SUPPORT: bool = false;
+use super::RegisterCapabilities;
 
 pub async fn on_semantic_token_handler(
     context: ServerContextSnapshot,
@@ -19,21 +22,38 @@ pub async fn on_semantic_token_handler(
     _: CancellationToken,
 ) -> Option<SemanticTokensResult> {
     let uri = params.text_document.uri;
-    let analysis = context.analysis.read().await;
-    let config_manager = context.config_manager.read().await;
-    let client_id = config_manager.client_config.client_id;
-    let _ = config_manager;
+    let analysis = context.analysis().read().await;
     let file_id = analysis.get_file_id(&uri)?;
-    let mut semantic_model = analysis.compilation.get_semantic_model(file_id)?;
 
-    if !semantic_model.get_emmyrc().semantic_tokens.enable {
+    let workspace_manager = context.workspace_manager().read().await;
+    let client_id = workspace_manager.client_config.client_id;
+    let _ = workspace_manager;
+
+    semantic_token(
+        &analysis,
+        file_id,
+        &context.client_capabilities(),
+        client_id,
+    )
+}
+
+pub fn semantic_token(
+    analysis: &EmmyLuaAnalysis,
+    file_id: FileId,
+    client_capabilities: &ClientCapabilities,
+    client_id: ClientId,
+) -> Option<SemanticTokensResult> {
+    let semantic_model = analysis.compilation.get_semantic_model(file_id)?;
+    let emmyrc = semantic_model.get_emmyrc();
+    if !emmyrc.semantic_tokens.enable {
         return None;
     }
 
     let result = build_semantic_tokens(
-        &mut semantic_model,
-        unsafe { SEMANTIC_MULTILINE_SUPPORT },
+        &semantic_model,
+        supports_multiline_tokens(client_capabilities),
         client_id,
+        emmyrc,
     )?;
 
     Some(SemanticTokensResult::Tokens(SemanticTokens {
@@ -42,29 +62,27 @@ pub async fn on_semantic_token_handler(
     }))
 }
 
-pub fn register_capabilities(
-    server_capabilities: &mut ServerCapabilities,
-    client_capabilities: &ClientCapabilities,
-) -> Option<()> {
-    server_capabilities.semantic_tokens_provider = Some(
-        SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
-            legend: SemanticTokensLegend {
-                token_modifiers: SEMANTIC_TOKEN_MODIFIERS.iter().cloned().collect(),
-                token_types: SEMANTIC_TOKEN_TYPES.iter().cloned().collect(),
-            },
-            full: Some(SemanticTokensFullOptions::Bool(true)),
-            ..Default::default()
-        }),
-    );
+pub struct SemanticTokenCapabilities;
 
-    if is_support_muliline_tokens(client_capabilities) {
-        unsafe { SEMANTIC_MULTILINE_SUPPORT = true };
+impl RegisterCapabilities for SemanticTokenCapabilities {
+    fn register_capabilities(
+        server_capabilities: &mut ServerCapabilities,
+        _client_capabilities: &ClientCapabilities,
+    ) {
+        server_capabilities.semantic_tokens_provider = Some(
+            SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                legend: SemanticTokensLegend {
+                    token_modifiers: SEMANTIC_TOKEN_MODIFIERS.iter().cloned().collect(),
+                    token_types: SEMANTIC_TOKEN_TYPES.iter().cloned().collect(),
+                },
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..Default::default()
+            }),
+        );
     }
-
-    Some(())
 }
 
-fn is_support_muliline_tokens(client_capability: &ClientCapabilities) -> bool {
+fn supports_multiline_tokens(client_capability: &ClientCapabilities) -> bool {
     if let Some(text_document) = &client_capability.text_document {
         if let Some(support) = &text_document.semantic_tokens {
             if let Some(support) = &support.multiline_token_support {

@@ -35,17 +35,43 @@ impl ClientId {
 
 pub fn get_client_id(client_info: &Option<ClientInfo>) -> ClientId {
     match client_info {
-        Some(info) => {
-            if info.name == "Visual Studio Code" {
-                ClientId::VSCode
-            } else if info.name == "IntelliJ" {
-                ClientId::Intellij
-            } else if info.name == "Neovim" {
-                ClientId::Neovim
-            } else {
-                ClientId::Other
-            }
-        }
+        Some(info) => match info.name.as_str() {
+            "Visual Studio Code" => ClientId::VSCode,
+            "Neovim" | "coc.nvim" => ClientId::Neovim,
+            _ if check_vscode(info) => ClientId::VSCode,
+            _ if check_lsp4ij(info) => ClientId::Intellij,
+            _ => ClientId::Other,
+        },
         None => ClientId::Other,
     }
+}
+
+fn check_vscode(client_info: &ClientInfo) -> bool {
+    let name = &client_info.name;
+
+    if name.contains("Visual Studio Code")
+        || name.contains("Code - OSS")
+        || name.contains("VSCodium")
+    {
+        return true;
+    }
+
+    match name.as_str() {
+        "Cursor" | "Windsurf" | "Trae" | "Qoder" => true,
+        _ => false,
+    }
+}
+
+fn check_lsp4ij(client_info: &ClientInfo) -> bool {
+    let name = &client_info.name;
+
+    name.contains("IntelliJ")
+        || name.contains("JetBrains")
+        || name.contains("IDEA")
+        || name.contains("PyCharm")
+        || name.contains("CLion")
+        || name.contains("GoLand")
+        || name.contains("Rider")
+        || name.contains("Fleet")
+        || name.contains("Android Studio")
 }

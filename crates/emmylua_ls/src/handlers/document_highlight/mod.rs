@@ -10,13 +10,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::context::ServerContextSnapshot;
 
+use super::RegisterCapabilities;
+
 pub async fn on_document_highlight_handler(
     context: ServerContextSnapshot,
     params: DocumentHighlightParams,
     _: CancellationToken,
 ) -> Option<Vec<DocumentHighlight>> {
     let uri = params.text_document_position_params.text_document.uri;
-    let analysis = context.analysis.read().await;
+    let analysis = context.analysis().read().await;
     let file_id = analysis.get_file_id(&uri)?;
     let position = params.text_document_position_params.position;
     let mut semantic_model = analysis.compilation.get_semantic_model(file_id)?;
@@ -47,10 +49,10 @@ pub async fn on_document_highlight_handler(
     highlight_tokens(&mut semantic_model, token)
 }
 
-pub fn register_capabilities(
-    server_capabilities: &mut ServerCapabilities,
-    _: &ClientCapabilities,
-) -> Option<()> {
-    server_capabilities.document_highlight_provider = Some(OneOf::Left(true));
-    Some(())
+pub struct DocumentHighlightCapabilities;
+
+impl RegisterCapabilities for DocumentHighlightCapabilities {
+    fn register_capabilities(server_capabilities: &mut ServerCapabilities, _: &ClientCapabilities) {
+        server_capabilities.document_highlight_provider = Some(OneOf::Left(true));
+    }
 }

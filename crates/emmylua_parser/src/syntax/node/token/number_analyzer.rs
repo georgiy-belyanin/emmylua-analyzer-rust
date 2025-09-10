@@ -1,4 +1,7 @@
-use crate::{parser_error::LuaParseError, LuaSyntaxToken};
+use crate::{
+    LuaSyntaxToken,
+    parser_error::{LuaParseError, LuaParseErrorKind},
+};
 
 pub fn float_token_value(token: &LuaSyntaxToken) -> Result<f64, LuaParseError> {
     let text = token.text();
@@ -55,6 +58,7 @@ pub fn float_token_value(token: &LuaSyntaxToken) -> Result<f64, LuaParseError> {
 
         let mut value = float_part.parse::<f64>().map_err(|e| {
             LuaParseError::new(
+                LuaParseErrorKind::SyntaxError,
                 &t!(
                     "The float literal '%{text}' is invalid, %{err}",
                     text = text,
@@ -82,7 +86,30 @@ enum IntegerRepr {
     Bin,
 }
 
-pub fn int_token_value(token: &LuaSyntaxToken) -> Result<i64, LuaParseError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegerOrUnsigned {
+    Int(i64),
+    Uint(u64),
+}
+
+impl IntegerOrUnsigned {
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self, IntegerOrUnsigned::Uint(_))
+    }
+
+    pub fn is_signed(&self) -> bool {
+        matches!(self, IntegerOrUnsigned::Int(_))
+    }
+
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            IntegerOrUnsigned::Int(value) => Some(*value),
+            IntegerOrUnsigned::Uint(_) => None,
+        }
+    }
+}
+
+pub fn int_token_value(token: &LuaSyntaxToken) -> Result<IntegerOrUnsigned, LuaParseError> {
     let text = token.text();
     let repr = if text.starts_with("0x") || text.starts_with("0X") {
         IntegerRepr::Hex
@@ -92,9 +119,24 @@ pub fn int_token_value(token: &LuaSyntaxToken) -> Result<i64, LuaParseError> {
         IntegerRepr::Normal
     };
 
-    let text = text.trim_end_matches(|c| c == 'u' || c == 'l' || c == 'U' || c == 'L');
+    // 检查是否有无符号后缀并去除后缀
+    let mut is_unsigned = false;
+    let mut suffix_count = 0;
+    for c in text.chars().rev() {
+        if c == 'u' || c == 'U' {
+            is_unsigned = true;
+            suffix_count += 1;
+        } else if c == 'l' || c == 'L' {
+            suffix_count += 1;
+        } else {
+            break;
+        }
+    }
 
-    let value = match repr {
+    let text = &text[..text.len() - suffix_count];
+
+    // 首先尝试解析为有符号整数
+    let signed_value = match repr {
         IntegerRepr::Hex => {
             let text = &text[2..];
             i64::from_str_radix(text, 16)
@@ -105,25 +147,55 @@ pub fn int_token_value(token: &LuaSyntaxToken) -> Result<i64, LuaParseError> {
         }
         IntegerRepr::Normal => text.parse::<i64>(),
     };
-    match value {
-        Ok(value) => Ok(value),
+
+    match signed_value {
+        Ok(value) => Ok(IntegerOrUnsigned::Int(value)),
         Err(e) => {
             let range = token.text_range();
-            if *e.kind() == std::num::IntErrorKind::PosOverflow
-                || *e.kind() == std::num::IntErrorKind::NegOverflow
-            {
+
+            // 如果是溢出错误，尝试解析为无符号整数
+            if *e.kind() == std::num::IntErrorKind::PosOverflow && is_unsigned {
+                let unsigned_value = match repr {
+                    IntegerRepr::Hex => {
+                        let text = &text[2..];
+                        u64::from_str_radix(text, 16)
+                    }
+                    IntegerRepr::Bin => {
+                        let text = &text[2..];
+                        u64::from_str_radix(text, 2)
+                    }
+                    IntegerRepr::Normal => text.parse::<u64>(),
+                };
+
+                match unsigned_value {
+                    Ok(value) => Ok(IntegerOrUnsigned::Uint(value)),
+                    Err(_) => Err(LuaParseError::new(
+                        LuaParseErrorKind::SyntaxError,
+                        &t!(
+                            "The integer literal '%{text}' is too large to be represented",
+                            text = token.text()
+                        ),
+                        range,
+                    )),
+                }
+            } else if matches!(
+                *e.kind(),
+                std::num::IntErrorKind::NegOverflow | std::num::IntErrorKind::PosOverflow
+            ) {
                 Err(LuaParseError::new(
+                    LuaParseErrorKind::SyntaxError,
                     &t!(
                         "The integer literal '%{text}' is too large to be represented in type 'long'",
-                        text = text
+                        text = token.text()
                     ),
                     range,
                 ))
             } else {
                 Err(LuaParseError::new(
+                    LuaParseErrorKind::SyntaxError,
                     &t!(
                         "The integer literal '%{text}' is invalid, %{err}",
-                        text = text,
+                        text = token.text(),
                         err = e
                     ),
                     range,

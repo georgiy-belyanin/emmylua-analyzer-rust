@@ -1,9 +1,12 @@
+mod best_log_path;
+
 use std::{env, fs, path::PathBuf};
 
+use best_log_path::get_best_log_dir;
 use chrono::Local;
-use code_analysis::file_path_to_uri;
+use emmylua_code_analysis::file_path_to_uri;
 use fern::Dispatch;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 
 use crate::cmd_args::{CmdArgs, LogLevel};
 
@@ -18,11 +21,13 @@ pub fn init_logger(root: Option<&str>, cmd_args: &CmdArgs) {
         LogLevel::Debug => LevelFilter::Debug,
     };
 
-    if root.is_none() {
+    let cmd_log_path = cmd_args.log_path.clone();
+    if root.is_none() && cmd_log_path.0.is_none() {
         init_stderr_logger(level);
         return;
     }
-    let root = root.unwrap();
+    let root = root.unwrap_or("");
+    let cmd_log_path = cmd_log_path.0.as_ref().cloned().unwrap_or("".to_string());
 
     let filename = if root.is_empty() || root == "/" {
         "root".to_string()
@@ -34,30 +39,37 @@ pub fn init_logger(root: Option<&str>, cmd_args: &CmdArgs) {
             .join("_")
     };
 
-    let exe_path = env::current_exe().unwrap();
-    let exe_dir = exe_path.parent().unwrap();
-    let log_dir = if cmd_args.log_path.is_empty() {
-        exe_dir.join("logs")
+    let log_dir = if cmd_log_path.is_empty() {
+        get_best_log_dir()
     } else {
-        PathBuf::from(cmd_args.log_path.as_str())
+        PathBuf::from(cmd_log_path.as_str())
     };
     if !log_dir.exists() {
-        fs::create_dir_all(&log_dir).unwrap();
+        match fs::create_dir_all(&log_dir) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Failed to create log directory: {:?}", e);
+                init_stderr_logger(level);
+                return;
+            }
+        }
     }
 
     let log_file_path = log_dir.join(format!("{}.log", filename));
 
-    if let Err(e) = fs::create_dir_all(log_dir) {
-        eprintln!("Failed to create log directory: {:?}", e);
-        return;
-    }
-
-    let log_file = std::fs::OpenOptions::new()
+    let log_file = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&log_file_path)
-        .unwrap();
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to open log file: {:?}", e);
+            init_stderr_logger(level);
+            return;
+        }
+    };
 
     let logger = Dispatch::new()
         .format(|out, message, record| {

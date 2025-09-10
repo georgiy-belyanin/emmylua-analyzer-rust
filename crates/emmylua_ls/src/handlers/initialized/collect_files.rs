@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use code_analysis::{load_workspace_files, Emmyrc, LuaFileInfo};
+use emmylua_code_analysis::{Emmyrc, LuaFileInfo, load_workspace_files};
 use log::{debug, info};
 
 pub fn collect_files(workspaces: &Vec<PathBuf>, emmyrc: &Emmyrc) -> Vec<LuaFileInfo> {
@@ -11,7 +11,7 @@ pub fn collect_files(workspaces: &Vec<PathBuf>, emmyrc: &Emmyrc) -> Vec<LuaFileI
 
     info!(
         "collect_files from: {:?} match_pattern: {:?} exclude: {:?}, exclude_dir: {:?}",
-        workspaces, match_pattern, exclude , exclude_dir
+        workspaces, match_pattern, exclude, exclude_dir
     );
     for workspace in workspaces {
         let loaded = load_workspace_files(

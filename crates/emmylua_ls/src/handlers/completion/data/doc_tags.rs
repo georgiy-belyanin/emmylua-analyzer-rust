@@ -1,4 +1,3 @@
-
 pub const DOC_TAGS: &[&str] = &[
     "class",
     "enum",
@@ -18,6 +17,7 @@ pub const DOC_TAGS: &[&str] = &[
     "protected",
     "private",
     "package",
+    "internal",
     "meta",
     "diagnostic",
     "version",
@@ -29,16 +29,7 @@ pub const DOC_TAGS: &[&str] = &[
     "using",
     "source",
     "readonly",
+    "return_cast",
+    "export",
+    "language",
 ];
-
-// // trivia tags just for completion
-// pub const DOC_OTHER_TAGS: &[&str] = &[
-//     "example",
-//     "note",
-//     "warning",
-//     "todo",
-//     "fixme",
-//     "author",
-//     "since",
-//     "throws",
-// ];

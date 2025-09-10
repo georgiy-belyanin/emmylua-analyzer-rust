@@ -10,7 +10,7 @@ This crate supports multiple languages, defaulting to English (en-US). Users can
 
 - Lossless syntax tree generation
 - Easy-to-use API based on the `rowan` library
-- Support for Lua5.1, Lua5.2, Lua5.3, Lua5.4 and LuaJIT
+- Support for Lua5.1, Lua5.2, Lua5.3, Lua5.4, Lua5.5 and LuaJIT
 - Support for EmmyLua/LuaCats annotations
 - Ability to parse code with syntax errors
 

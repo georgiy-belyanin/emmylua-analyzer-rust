@@ -1,10 +1,10 @@
-use code_analysis::{LuaDeclId, LuaMemberId, SemanticModel};
+use emmylua_code_analysis::{LuaDeclId, LuaMemberId, SemanticModel};
 use emmylua_parser::{LuaAst, LuaAstNode, LuaAstToken, LuaFuncStat, LuaLocalFuncStat, LuaVarExpr};
 use lsp_types::CodeLens;
 
 use super::CodeLensData;
 
-pub fn build_code_lens(semantic_model: &mut SemanticModel) -> Option<Vec<CodeLens>> {
+pub fn build_code_lens(semantic_model: &SemanticModel) -> Option<Vec<CodeLens>> {
     let mut result = Vec::new();
     let root = semantic_model.get_root().clone();
     for node in root.descendants::<LuaAst>() {
@@ -23,7 +23,7 @@ pub fn build_code_lens(semantic_model: &mut SemanticModel) -> Option<Vec<CodeLen
 }
 
 fn add_func_stat_code_lens(
-    semantic_model: &mut SemanticModel,
+    semantic_model: &SemanticModel,
     result: &mut Vec<CodeLens>,
     func_stat: LuaFuncStat,
 ) -> Option<()> {
@@ -59,7 +59,7 @@ fn add_func_stat_code_lens(
 }
 
 fn add_local_func_stat_code_lens(
-    semantic_model: &mut SemanticModel,
+    semantic_model: &SemanticModel,
     result: &mut Vec<CodeLens>,
     local_func_stat: LuaLocalFuncStat,
 ) -> Option<()> {

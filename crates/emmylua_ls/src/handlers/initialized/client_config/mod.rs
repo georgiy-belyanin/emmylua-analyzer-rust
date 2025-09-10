@@ -1,7 +1,7 @@
+mod default_config;
 mod vscode_config;
-mod neovim_config;
 
-use neovim_config::get_client_config_neovim;
+use default_config::get_client_config_default;
 use serde_json::Value;
 use vscode_config::get_client_config_vscode;
 
@@ -14,12 +14,13 @@ pub struct ClientConfig {
     pub exclude: Vec<String>,
     pub extensions: Vec<String>,
     pub encoding: String,
-    pub partial_emmyrcs: Option<Vec<Value>>
+    pub partial_emmyrcs: Option<Vec<Value>>,
 }
 
 pub async fn get_client_config(
     context: &ServerContextSnapshot,
     client_id: ClientId,
+    supports_config_request: bool,
 ) -> ClientConfig {
     let mut config = ClientConfig {
         client_id,
@@ -29,9 +30,16 @@ pub async fn get_client_config(
         partial_emmyrcs: None,
     };
     match client_id {
-        ClientId::VSCode => get_client_config_vscode(context, &mut config).await,
-        ClientId::Neovim => get_client_config_neovim(context, &mut config).await,
-        _ => Some(()),
+        ClientId::VSCode => {
+            get_client_config_vscode(context, &mut config).await;
+        }
+        ClientId::Neovim => {
+            get_client_config_default(context, &mut config, Some(&["Lua", "emmylua"])).await;
+        }
+        _ if supports_config_request => {
+            get_client_config_default(context, &mut config, None).await;
+        }
+        _ => {}
     };
 
     config

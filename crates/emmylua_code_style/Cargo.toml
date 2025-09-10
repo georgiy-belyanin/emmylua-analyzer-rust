@@ -1,0 +1,9 @@
+[package]
+name = "emmylua_code_style"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde.workspace = true
+emmylua_parser.workspace = true
+rowan.workspace = true

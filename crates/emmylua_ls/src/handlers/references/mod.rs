@@ -1,12 +1,17 @@
 mod reference_seacher;
 
 use crate::context::ServerContextSnapshot;
+use emmylua_code_analysis::{EmmyLuaAnalysis, FileId};
 use emmylua_parser::{LuaAstNode, LuaTokenKind};
-use lsp_types::{ClientCapabilities, Location, OneOf, ReferenceParams, ServerCapabilities};
+use lsp_types::{
+    ClientCapabilities, Location, OneOf, Position, ReferenceParams, ServerCapabilities,
+};
 use reference_seacher::search_references;
 pub use reference_seacher::{search_decl_references, search_member_references};
 use rowan::TokenAtOffset;
 use tokio_util::sync::CancellationToken;
+
+use super::RegisterCapabilities;
 
 pub async fn on_references_handler(
     context: ServerContextSnapshot,
@@ -14,14 +19,22 @@ pub async fn on_references_handler(
     _: CancellationToken,
 ) -> Option<Vec<Location>> {
     let uri = params.text_document_position.text_document.uri;
-    let analysis = context.analysis.read().await;
+    let analysis = context.analysis().read().await;
     let file_id = analysis.get_file_id(&uri)?;
     let position = params.text_document_position.position;
+
+    references(&analysis, file_id, position)
+}
+
+pub fn references(
+    analysis: &EmmyLuaAnalysis,
+    file_id: FileId,
+    position: Position,
+) -> Option<Vec<Location>> {
     let mut semantic_model = analysis.compilation.get_semantic_model(file_id)?;
     if !semantic_model.get_emmyrc().references.enable {
         return None;
     }
-
 
     let root = semantic_model.get_root();
     let position_offset = {
@@ -50,10 +63,10 @@ pub async fn on_references_handler(
     search_references(&mut semantic_model, &analysis.compilation, token)
 }
 
-pub fn register_capabilities(
-    server_capabilities: &mut ServerCapabilities,
-    _: &ClientCapabilities,
-) -> Option<()> {
-    server_capabilities.references_provider = Some(OneOf::Left(true));
-    Some(())
+pub struct ReferencesCapabilities;
+
+impl RegisterCapabilities for ReferencesCapabilities {
+    fn register_capabilities(server_capabilities: &mut ServerCapabilities, _: &ClientCapabilities) {
+        server_capabilities.references_provider = Some(OneOf::Left(true));
+    }
 }

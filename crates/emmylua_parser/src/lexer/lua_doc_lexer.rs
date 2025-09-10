@@ -26,10 +26,11 @@ pub enum LuaDocLexerState {
     Version,
     Source,
     NormalDescription,
+    CastExpr,
 }
 
 impl LuaDocLexer<'_> {
-    pub fn new<'a>(origin_text: &'a str) -> LuaDocLexer<'a> {
+    pub fn new(origin_text: &str) -> LuaDocLexer<'_> {
         LuaDocLexer {
             origin_text,
             reader: None,
@@ -46,11 +47,11 @@ impl LuaDocLexer<'_> {
     }
 
     pub fn reset(&mut self, kind: LuaTokenKind, range: SourceRange) {
-        self.reader = Some(Reader::new_with_range(self.origin_text, range));
+        let text = &self.origin_text[range.start_offset..range.end_offset()];
+        self.reader = Some(Reader::new_with_range(text, range));
         self.origin_token_kind = kind;
     }
 
-    #[allow(unused)]
     pub fn lex(&mut self) -> LuaTokenKind {
         let reader = self.reader.as_mut().unwrap();
         reader.reset_buff();
@@ -71,19 +72,19 @@ impl LuaDocLexer<'_> {
             LuaDocLexerState::Version => self.lex_version(),
             LuaDocLexerState::Source => self.lex_source(),
             LuaDocLexerState::NormalDescription => self.lex_normal_description(),
-            _ => LuaTokenKind::None,
+            LuaDocLexerState::CastExpr => self.lex_cast_expr(),
         }
     }
 
     pub fn current_token_range(&self) -> SourceRange {
-        self.reader.as_ref().unwrap().saved_range()
+        self.reader.as_ref().unwrap().current_range()
     }
 
     fn lex_init(&mut self) -> LuaTokenKind {
         let reader = self.reader.as_mut().unwrap();
         match reader.current_char() {
-            '-' => {
-                let count = reader.eat_when('-');
+            '-' if reader.is_start_of_line() => {
+                let count = reader.consume_char_n_times('-', 3);
                 match count {
                     2 => {
                         if self.origin_token_kind == LuaTokenKind::TkLongComment {
@@ -94,12 +95,12 @@ impl LuaDocLexer<'_> {
                             match reader.current_char() {
                                 '@' => {
                                     reader.bump();
-                                    return LuaTokenKind::TkDocLongStart;
+                                    LuaTokenKind::TkDocLongStart
                                 }
-                                _ => return LuaTokenKind::TkLongCommentStart,
+                                _ => LuaTokenKind::TkLongCommentStart,
                             }
                         } else {
-                            return LuaTokenKind::TkNormalStart;
+                            LuaTokenKind::TkNormalStart
                         }
                     }
                     3 => {
@@ -108,15 +109,6 @@ impl LuaDocLexer<'_> {
                             '@' => {
                                 reader.bump();
                                 LuaTokenKind::TkDocStart
-                            }
-                            '|' => {
-                                reader.bump();
-                                // compact luals
-                                if matches!(reader.current_char(), '+' | '>') {
-                                    reader.bump();
-                                }
-
-                                LuaTokenKind::TkDocContinueOr
                             }
                             _ => LuaTokenKind::TkNormalStart,
                         }
@@ -144,7 +136,7 @@ impl LuaDocLexer<'_> {
             ch if is_name_start(ch) => {
                 reader.bump();
                 reader.eat_while(is_name_continue);
-                let text = reader.current_saved_text();
+                let text = reader.current_text();
                 to_tag(text)
             }
             _ => {
@@ -288,19 +280,11 @@ impl LuaDocLexer<'_> {
 
                 LuaTokenKind::TkString
             }
-            '`' => {
-                reader.bump();
-                reader.eat_while(|c| c != '`');
-                if reader.current_char() == '`' {
-                    reader.bump();
+            ch if is_name_start(ch) || ch == '`' => {
+                let (text, str_tpl) = read_doc_name(reader);
+                if str_tpl {
+                    return LuaTokenKind::TkStringTemplateType;
                 }
-
-                LuaTokenKind::TkStringTemplateType
-            }
-            ch if is_name_start(ch) => {
-                reader.bump();
-                reader.eat_while(is_doc_name_continue);
-                let text = reader.current_saved_text();
                 to_token_or_name(text)
             }
             _ => {
@@ -314,9 +298,7 @@ impl LuaDocLexer<'_> {
         let reader = self.reader.as_mut().unwrap();
         match reader.current_char() {
             ch if is_name_start(ch) => {
-                reader.bump();
-                reader.eat_while(is_doc_name_continue);
-                let text = reader.current_saved_text();
+                let (text, _) = read_doc_name(reader);
                 to_modification_or_name(text)
             }
             _ => self.lex_normal(),
@@ -330,12 +312,50 @@ impl LuaDocLexer<'_> {
                 reader.eat_while(is_doc_whitespace);
                 LuaTokenKind::TkWhitespace
             }
-            '-' => {
-                if !reader.is_start_of_line() {
-                    reader.eat_while(|_| true);
-                    return LuaTokenKind::TkDocDetail;
+            '-' if reader.is_start_of_line() => {
+                let count = reader.consume_char_n_times('-', 3);
+                match count {
+                    2 => {
+                        if self.origin_token_kind == LuaTokenKind::TkLongComment {
+                            reader.bump();
+                            reader.eat_when('=');
+                            reader.bump();
+
+                            match reader.current_char() {
+                                '@' => {
+                                    reader.bump();
+                                    LuaTokenKind::TkDocLongStart
+                                }
+                                _ => LuaTokenKind::TkLongCommentStart,
+                            }
+                        } else {
+                            LuaTokenKind::TkNormalStart
+                        }
+                    }
+                    3 => {
+                        reader.eat_while(is_doc_whitespace);
+                        match reader.current_char() {
+                            '@' => {
+                                reader.bump();
+                                LuaTokenKind::TkDocStart
+                            }
+                            '|' => {
+                                reader.bump();
+                                // compact luals
+                                if matches!(reader.current_char(), '+' | '>') {
+                                    reader.bump();
+                                }
+
+                                LuaTokenKind::TkDocContinueOr
+                            }
+                            _ => LuaTokenKind::TkNormalStart,
+                        }
+                    }
+                    _ => {
+                        reader.eat_while(|_| true);
+                        LuaTokenKind::TKDocTriviaStart
+                    }
                 }
-                self.lex_init()
             }
             _ => {
                 reader.eat_while(|_| true);
@@ -378,11 +398,14 @@ impl LuaDocLexer<'_> {
     fn lex_see(&mut self) -> LuaTokenKind {
         let reader = self.reader.as_mut().unwrap();
         match reader.current_char() {
-            '#' => {
-                reader.bump();
-                LuaTokenKind::TkLen
+            ' ' | '\t' => {
+                reader.eat_while(is_doc_whitespace);
+                LuaTokenKind::TkWhitespace
             }
-            _ => self.lex_normal(),
+            _ => {
+                reader.eat_while(|_| true);
+                LuaTokenKind::TkDocSeeContent
+            }
         }
     }
 
@@ -420,9 +443,7 @@ impl LuaDocLexer<'_> {
                 LuaTokenKind::TkDocVersionNumber
             }
             ch if is_name_start(ch) => {
-                reader.bump();
-                reader.eat_while(is_doc_name_continue);
-                let text = reader.current_saved_text();
+                let (text, _) = read_doc_name(reader);
                 match text {
                     "JIT" => LuaTokenKind::TkDocVersionNumber,
                     _ => LuaTokenKind::TkName,
@@ -464,19 +485,82 @@ impl LuaDocLexer<'_> {
                 reader.eat_while(is_doc_whitespace);
                 LuaTokenKind::TkWhitespace
             }
-            ch if ch.is_ascii_alphabetic() => {
+            ch if ch.is_ascii_alphabetic() || ch == '#' => {
+                if reader.current_char() == '#' {
+                    reader.bump();
+                }
+
                 reader.eat_while(|c| c.is_ascii_alphabetic());
-                let text = reader.current_saved_text();
-                return match text {
-                    "region" => LuaTokenKind::TkDocRegion,
-                    "endregion" => LuaTokenKind::TkDocEndRegion,
+                let text = reader.current_text();
+                match text {
+                    "region" | "#region" => LuaTokenKind::TkDocRegion,
+                    "endregion" | "#endregion" => LuaTokenKind::TkDocEndRegion,
                     _ => {
                         reader.eat_while(|_| true);
                         LuaTokenKind::TkDocDetail
                     }
-                };
+                }
             }
-            _ => self.lex_description(),
+            '-' if reader.is_start_of_line() => {
+                let count = reader.consume_char_n_times('-', 3);
+                match count {
+                    2 => {
+                        if self.origin_token_kind == LuaTokenKind::TkLongComment {
+                            reader.bump();
+                            reader.eat_when('=');
+                            reader.bump();
+
+                            match reader.current_char() {
+                                '@' => {
+                                    reader.bump();
+                                    LuaTokenKind::TkDocLongStart
+                                }
+                                _ => LuaTokenKind::TkLongCommentStart,
+                            }
+                        } else {
+                            LuaTokenKind::TkNormalStart
+                        }
+                    }
+                    3 => {
+                        reader.eat_while(is_doc_whitespace);
+                        match reader.current_char() {
+                            '@' => {
+                                reader.bump();
+                                LuaTokenKind::TkDocStart
+                            }
+                            _ => LuaTokenKind::TkNormalStart,
+                        }
+                    }
+                    _ => {
+                        reader.eat_while(|_| true);
+                        LuaTokenKind::TKDocTriviaStart
+                    }
+                }
+            }
+            _ => {
+                reader.eat_while(|_| true);
+                LuaTokenKind::TkDocDetail
+            }
+        }
+    }
+
+    fn lex_cast_expr(&mut self) -> LuaTokenKind {
+        let reader = self.reader.as_mut().unwrap();
+        match reader.current_char() {
+            ch if is_doc_whitespace(ch) => {
+                reader.eat_while(is_doc_whitespace);
+                LuaTokenKind::TkWhitespace
+            }
+            '.' => {
+                reader.bump();
+                LuaTokenKind::TkDot
+            }
+            ch if is_name_start(ch) => {
+                reader.bump();
+                reader.eat_while(is_name_continue);
+                LuaTokenKind::TkName
+            }
+            _ => self.lex_normal(),
         }
     }
 }
@@ -492,6 +576,7 @@ fn to_tag(text: &str) -> LuaTokenKind {
         "type" => LuaTokenKind::TkTagType,
         "param" => LuaTokenKind::TkTagParam,
         "return" => LuaTokenKind::TkTagReturn,
+        "return_cast" => LuaTokenKind::TkTagReturnCast,
         "generic" => LuaTokenKind::TkTagGeneric,
         "see" => LuaTokenKind::TkTagSee,
         "overload" => LuaTokenKind::TkTagOverload,
@@ -512,15 +597,15 @@ fn to_tag(text: &str) -> LuaTokenKind {
         "namespace" => LuaTokenKind::TkTagNamespace,
         "using" => LuaTokenKind::TkTagUsing,
         "source" => LuaTokenKind::TkTagSource,
+        "export" => LuaTokenKind::TkTagExport,
+        "language" => LuaTokenKind::TkLanguage,
         _ => LuaTokenKind::TkTagOther,
     }
 }
 
 fn to_modification_or_name(text: &str) -> LuaTokenKind {
     match text {
-        "private" | "protected" | "public" | "package" | "internal" => {
-            LuaTokenKind::TkDocVisibility
-        }
+        "private" | "protected" | "public" | "package" => LuaTokenKind::TkDocVisibility,
         "readonly" => LuaTokenKind::TkDocReadonly,
         _ => LuaTokenKind::TkName,
     }
@@ -528,7 +613,8 @@ fn to_modification_or_name(text: &str) -> LuaTokenKind {
 
 fn to_token_or_name(text: &str) -> LuaTokenKind {
     match text {
-        "true" | "false" => LuaTokenKind::TkDocBoolean,
+        "true" => LuaTokenKind::TkTrue,
+        "false" => LuaTokenKind::TkFalse,
         "keyof" => LuaTokenKind::TkDocKeyOf,
         "extends" => LuaTokenKind::TkDocExtends,
         "as" => LuaTokenKind::TkDocAs,
@@ -542,8 +628,32 @@ fn is_doc_whitespace(ch: char) -> bool {
     ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
 }
 
-fn is_doc_name_continue(ch: char) -> bool {
-    is_name_continue(ch) || ch == '.' || ch == '-' || ch == '*'
+fn read_doc_name<'a>(reader: &'a mut Reader) -> (&'a str, bool /* str tpl */) {
+    reader.bump();
+    let mut str_tpl = false;
+    while !reader.is_eof() {
+        match reader.current_char() {
+            ch if is_name_continue(ch) => {
+                reader.bump();
+            }
+            // donot continue if next char is '.' or '-' or '*' or '`'
+            '.' | '-' | '*' => {
+                let next = reader.next_char();
+                if next == '.' || next == '-' || next == '*' {
+                    break;
+                }
+
+                reader.bump();
+            }
+            '`' => {
+                str_tpl = true;
+                reader.bump();
+            }
+            _ => break,
+        }
+    }
+
+    (reader.current_text(), str_tpl)
 }
 
 fn is_source_continue(ch: char) -> bool {

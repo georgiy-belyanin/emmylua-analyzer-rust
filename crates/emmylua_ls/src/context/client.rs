@@ -1,17 +1,18 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicI32, Arc},
+    sync::{Arc, atomic::AtomicI32},
 };
 
 use lsp_server::{Connection, Message, Notification, RequestId, Response};
 use lsp_types::{
-    ApplyWorkspaceEditParams, ApplyWorkspaceEditResponse, ConfigurationParams,
-    PublishDiagnosticsParams, RegistrationParams, ShowMessageParams, UnregistrationParams,
+    ApplyWorkspaceEditParams, ApplyWorkspaceEditResponse, ConfigurationParams, MessageActionItem,
+    PublishDiagnosticsParams, RegistrationParams, ShowMessageParams, ShowMessageRequestParams,
+    UnregistrationParams,
 };
 use serde::de::DeserializeOwned;
 use tokio::{
     select,
-    sync::{oneshot, Mutex},
+    sync::{Mutex, oneshot},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -118,6 +119,23 @@ impl ClientProxy {
         self.send_notification("window/showMessage", message);
     }
 
+    pub async fn show_message_request(
+        &self,
+        params: ShowMessageRequestParams,
+        cancel_token: CancellationToken,
+    ) -> Option<MessageActionItem> {
+        let request_id = self.next_id();
+        let response = self
+            .send_request(
+                request_id,
+                "window/showMessageRequest",
+                params,
+                cancel_token,
+            )
+            .await?;
+        serde_json::from_value(response.result?).ok()
+    }
+
     pub fn publish_diagnostics(&self, params: PublishDiagnosticsParams) {
         self.send_notification("textDocument/publishDiagnostics", params);
     }
@@ -125,16 +143,11 @@ impl ClientProxy {
     pub async fn apply_edit(
         &self,
         params: ApplyWorkspaceEditParams,
-        cancel_token: CancellationToken
+        cancel_token: CancellationToken,
     ) -> Option<ApplyWorkspaceEditResponse> {
         let request_id = self.next_id();
         let r = self
-            .send_request(
-                request_id,
-                "workspace/applyEdit",
-                params,
-                cancel_token,
-            )
+            .send_request(request_id, "workspace/applyEdit", params, cancel_token)
             .await?;
         serde_json::from_value(r.result?).ok()
     }

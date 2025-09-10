@@ -1,13 +1,6 @@
 use crate::{LuaAstNode, LuaDocDetailToken, LuaSyntaxKind, LuaSyntaxNode, LuaTokenKind};
 
 #[allow(unused)]
-pub trait LuaDocDescriptionOwner: LuaAstNode {
-    fn get_description(&self) -> Option<LuaDocDescription> {
-        self.child()
-    }
-}
-
-#[allow(unused)]
 pub trait LuaDocDetailOwner: LuaAstNode {
     fn get_detail(&self) -> Option<LuaDocDetailToken> {
         self.token()
@@ -66,8 +59,8 @@ impl LuaDocDescription {
                 }
                 LuaTokenKind::TkNormalStart | LuaTokenKind::TkDocContinue => {
                     let mut white_space_count = 0;
-                    let mut start_text_chars = token.text().chars();
-                    while let Some(c) = start_text_chars.next() {
+                    let start_text_chars = token.text().chars();
+                    for c in start_text_chars {
                         if c == ' ' {
                             white_space_count += 1;
                         } else if c == '\t' {

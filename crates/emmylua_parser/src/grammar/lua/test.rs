@@ -1,10 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use crate::{parser::ParserConfig, LuaParser};
+    use crate::{LuaLanguageLevel, LuaParser, parser::ParserConfig};
 
     macro_rules! assert_ast_eq {
         ($lua_code:expr, $expected:expr) => {
             let tree = LuaParser::parse($lua_code, ParserConfig::default());
+            let result = format!("{:#?}", tree.get_red_root()).trim().to_string();
+            let expected = $expected.trim().to_string();
+            assert_eq!(result, expected);
+        };
+        ($lua_code:expr, $expected:expr, $config:expr) => {
+            let tree = LuaParser::parse($lua_code, $config);
             let result = format!("{:#?}", tree.get_red_root()).trim().to_string();
             let expected = $expected.trim().to_string();
             assert_eq!(result, expected);
@@ -14,6 +20,12 @@ mod tests {
     #[allow(unused)]
     fn print_ast(lua_code: &str) {
         let tree = LuaParser::parse(lua_code, ParserConfig::default());
+        println!("{:#?}", tree.get_red_root());
+    }
+
+    #[allow(unused)]
+    fn print_ast_config(lua_code: &str, config: ParserConfig) {
+        let tree = LuaParser::parse(lua_code, config);
         println!("{:#?}", tree.get_red_root());
     }
 
@@ -340,7 +352,7 @@ Syntax(Chunk)@0..770
     Token(TkEndOfLine)@673..674 "\n"
     Token(TkWhitespace)@674..686 "            "
     Syntax(CallExprStat)@686..705
-      Syntax(CallExpr)@686..705
+      Syntax(SetmetatableCallExpr)@686..705
         Syntax(NameExpr)@686..698
           Token(TkName)@686..698 "setmetatable"
         Syntax(CallArgList)@698..705
@@ -388,6 +400,7 @@ Syntax(Chunk)@0..770
     Token(TkEndOfLine)@761..762 "\n"
     Token(TkWhitespace)@762..770 "        "
 "#;
+
         assert_ast_eq!(code, result);
     }
 
@@ -628,7 +641,7 @@ Syntax(Chunk)@0..183
     Token(TkEndOfLine)@65..66 "\n"
     Token(TkWhitespace)@66..74 "        "
     Syntax(CallExprStat)@74..93
-      Syntax(CallExpr)@74..93
+      Syntax(RequireCallExpr)@74..93
         Syntax(NameExpr)@74..81
           Token(TkName)@74..81 "require"
         Token(TkWhitespace)@81..82 " "
@@ -1111,7 +1124,162 @@ Syntax(Chunk)@0..4
             Token(TkRightParen)@2..3 ")"
         Token(TkColon)@3..4 ":"
         "#;
-        
+
         assert_ast_eq!(code, result);
+    }
+
+    #[test]
+    fn test_lua55_global_grammar() {
+        let code = "global a, b;";
+        let result = r#"
+Syntax(Chunk)@0..12
+  Syntax(Block)@0..12
+    Syntax(GlobalStat)@0..12
+      Token(TkGlobal)@0..6 "global"
+      Token(TkWhitespace)@6..7 " "
+      Syntax(LocalName)@7..8
+        Token(TkName)@7..8 "a"
+      Token(TkComma)@8..9 ","
+      Token(TkWhitespace)@9..10 " "
+      Syntax(LocalName)@10..11
+        Token(TkName)@10..11 "b"
+      Token(TkSemicolon)@11..12 ";"
+        "#;
+
+        assert_ast_eq!(
+            code,
+            result,
+            ParserConfig::with_level(LuaLanguageLevel::Lua55)
+        );
+
+        let code2 = "global <const> a, b<const>";
+        let result2 = r#"
+Syntax(Chunk)@0..26
+  Syntax(Block)@0..26
+    Syntax(GlobalStat)@0..26
+      Token(TkGlobal)@0..6 "global"
+      Token(TkWhitespace)@6..7 " "
+      Syntax(Attribute)@7..14
+        Token(TkLt)@7..8 "<"
+        Token(TkName)@8..13 "const"
+        Token(TkGt)@13..14 ">"
+      Token(TkWhitespace)@14..15 " "
+      Syntax(LocalName)@15..16
+        Token(TkName)@15..16 "a"
+      Token(TkComma)@16..17 ","
+      Token(TkWhitespace)@17..18 " "
+      Syntax(LocalName)@18..26
+        Token(TkName)@18..19 "b"
+        Syntax(Attribute)@19..26
+          Token(TkLt)@19..20 "<"
+          Token(TkName)@20..25 "const"
+          Token(TkGt)@25..26 ">"
+        "#;
+
+        assert_ast_eq!(
+            code2,
+            result2,
+            ParserConfig::with_level(LuaLanguageLevel::Lua55)
+        );
+    }
+
+    #[test]
+    fn test_wrong_table_expr() {
+        let code = r#"
+        local _A = {
+            a = ,
+            b = ,
+            c = ,
+        }
+        "#;
+        let result = r#"
+Syntax(Chunk)@0..94
+  Syntax(Block)@0..94
+    Token(TkEndOfLine)@0..1 "\n"
+    Token(TkWhitespace)@1..9 "        "
+    Syntax(LocalStat)@9..85
+      Token(TkLocal)@9..14 "local"
+      Token(TkWhitespace)@14..15 " "
+      Syntax(LocalName)@15..17
+        Token(TkName)@15..17 "_A"
+      Token(TkWhitespace)@17..18 " "
+      Token(TkAssign)@18..19 "="
+      Token(TkWhitespace)@19..20 " "
+      Syntax(TableObjectExpr)@20..85
+        Token(TkLeftBrace)@20..21 "{"
+        Token(TkEndOfLine)@21..22 "\n"
+        Token(TkWhitespace)@22..34 "            "
+        Syntax(TableFieldAssign)@34..37
+          Token(TkName)@34..35 "a"
+          Token(TkWhitespace)@35..36 " "
+          Token(TkAssign)@36..37 "="
+        Token(TkWhitespace)@37..38 " "
+        Token(TkComma)@38..39 ","
+        Token(TkEndOfLine)@39..40 "\n"
+        Token(TkWhitespace)@40..52 "            "
+        Syntax(TableFieldAssign)@52..55
+          Token(TkName)@52..53 "b"
+          Token(TkWhitespace)@53..54 " "
+          Token(TkAssign)@54..55 "="
+        Token(TkWhitespace)@55..56 " "
+        Token(TkComma)@56..57 ","
+        Token(TkEndOfLine)@57..58 "\n"
+        Token(TkWhitespace)@58..70 "            "
+        Syntax(TableFieldAssign)@70..73
+          Token(TkName)@70..71 "c"
+          Token(TkWhitespace)@71..72 " "
+          Token(TkAssign)@72..73 "="
+        Token(TkWhitespace)@73..74 " "
+        Token(TkComma)@74..75 ","
+        Token(TkEndOfLine)@75..76 "\n"
+        Token(TkWhitespace)@76..84 "        "
+        Token(TkRightBrace)@84..85 "}"
+    Token(TkEndOfLine)@85..86 "\n"
+    Token(TkWhitespace)@86..94 "        "
+        "#;
+
+        assert_ast_eq!(code, result);
+    }
+
+    #[test]
+    fn test_lua55_local_grammar() {
+        let code = "local <const> a, b<const> = 1, 2";
+        let result = r#"
+Syntax(Chunk)@0..32
+  Syntax(Block)@0..32
+    Syntax(LocalStat)@0..32
+      Token(TkLocal)@0..5 "local"
+      Token(TkWhitespace)@5..6 " "
+      Syntax(Attribute)@6..13
+        Token(TkLt)@6..7 "<"
+        Token(TkName)@7..12 "const"
+        Token(TkGt)@12..13 ">"
+      Token(TkWhitespace)@13..14 " "
+      Syntax(LocalName)@14..15
+        Token(TkName)@14..15 "a"
+      Token(TkComma)@15..16 ","
+      Token(TkWhitespace)@16..17 " "
+      Syntax(LocalName)@17..25
+        Token(TkName)@17..18 "b"
+        Syntax(Attribute)@18..25
+          Token(TkLt)@18..19 "<"
+          Token(TkName)@19..24 "const"
+          Token(TkGt)@24..25 ">"
+      Token(TkWhitespace)@25..26 " "
+      Token(TkAssign)@26..27 "="
+      Token(TkWhitespace)@27..28 " "
+      Syntax(LiteralExpr)@28..29
+        Token(TkInt)@28..29 "1"
+      Token(TkComma)@29..30 ","
+      Token(TkWhitespace)@30..31 " "
+      Syntax(LiteralExpr)@31..32
+        Token(TkInt)@31..32 "2"
+        "#;
+
+        assert_ast_eq!(
+            code,
+            result,
+            ParserConfig::with_level(LuaLanguageLevel::Lua55)
+        );
     }
 }

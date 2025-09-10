@@ -10,8 +10,13 @@ impl SourceRange {
     pub fn new(start_offset: usize, length: usize) -> SourceRange {
         SourceRange {
             start_offset,
-            length
+            length,
         }
+    }
+
+    pub fn from_start_end(start_offset: usize, end_offset: usize) -> Self {
+        assert!(start_offset <= end_offset);
+        Self::new(start_offset, end_offset - start_offset)
     }
 
     pub const EMPTY: SourceRange = SourceRange {
@@ -23,8 +28,12 @@ impl SourceRange {
         self.start_offset + self.length
     }
 
-    pub fn contain(&self, offset: usize) -> bool {
+    pub fn contains(&self, offset: usize) -> bool {
         offset >= self.start_offset && offset < self.end_offset()
+    }
+
+    pub fn contains_inclusive(&self, offset: usize) -> bool {
+        offset >= self.start_offset && offset <= self.end_offset()
     }
 
     pub fn contain_range(&self, range: &SourceRange) -> bool {
@@ -33,6 +42,11 @@ impl SourceRange {
 
     pub fn intersect(&self, range: &SourceRange) -> bool {
         self.start_offset < range.end_offset() && range.start_offset < self.end_offset()
+    }
+
+    pub fn moved(&self, offset: usize) -> SourceRange {
+        debug_assert!(offset <= self.length);
+        SourceRange::new(self.start_offset + offset, self.length - offset)
     }
 
     pub fn merge(&self, range: &SourceRange) -> SourceRange {
@@ -55,8 +69,17 @@ impl std::fmt::Display for SourceRange {
     }
 }
 
-impl Into<TextRange> for SourceRange {
-    fn into(self) -> TextRange {
-        TextRange::new((self.start_offset as u32).into(), (self.end_offset() as u32).into())
+impl From<SourceRange> for TextRange {
+    fn from(val: SourceRange) -> Self {
+        TextRange::new(
+            (val.start_offset as u32).into(),
+            (val.end_offset() as u32).into(),
+        )
+    }
+}
+
+impl From<TextRange> for SourceRange {
+    fn from(val: TextRange) -> Self {
+        SourceRange::new(val.start().into(), val.len().into())
     }
 }

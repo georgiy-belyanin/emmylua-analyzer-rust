@@ -1,4 +1,4 @@
-use code_analysis::{read_file_with_encoding, uri_to_file_path};
+use emmylua_code_analysis::{read_file_with_encoding, uri_to_file_path};
 use lsp_types::{DidChangeWatchedFilesParams, FileChangeType, Uri};
 
 use crate::context::ServerContextSnapshot;
@@ -7,7 +7,8 @@ pub async fn on_did_change_watched_files(
     context: ServerContextSnapshot,
     params: DidChangeWatchedFilesParams,
 ) -> Option<()> {
-    let mut analysis = context.analysis.write().await;
+    let workspace = context.workspace_manager().read().await;
+    let mut analysis = context.analysis().write().await;
     let emmyrc = analysis.get_emmyrc();
     let encoding = &emmyrc.workspace.encoding;
     let interval = emmyrc.diagnostics.diagnostic_interval.unwrap_or(500);
@@ -17,12 +18,28 @@ pub async fn on_did_change_watched_files(
         let file_type = get_file_type(&file_event.uri);
         match file_type {
             Some(WatchedFileType::Lua) => {
-                collect_lua_files(
-                    &mut watched_lua_files,
-                    file_event.uri,
-                    file_event.typ,
-                    encoding,
-                );
+                if file_event.typ == FileChangeType::DELETED {
+                    analysis.remove_file_by_uri(&file_event.uri);
+                    // 发送空诊断消息以清除客户端显示的诊断
+                    context
+                        .file_diagnostic()
+                        .clear_file_diagnostics(file_event.uri)
+                        .await;
+                    continue;
+                }
+
+                if !workspace.current_open_files.contains(&file_event.uri) {
+                    if !workspace.is_workspace_file(&file_event.uri) {
+                        continue;
+                    }
+
+                    collect_lua_files(
+                        &mut watched_lua_files,
+                        file_event.uri,
+                        file_event.typ,
+                        encoding,
+                    );
+                }
             }
             Some(WatchedFileType::Editorconfig) => {
                 if file_event.typ == FileChangeType::DELETED {
@@ -30,7 +47,7 @@ pub async fn on_did_change_watched_files(
                 }
                 let editorconfig_path = uri_to_file_path(&file_event.uri).unwrap();
                 context
-                    .config_manager
+                    .workspace_manager()
                     .read()
                     .await
                     .update_editorconfig(editorconfig_path);
@@ -42,7 +59,7 @@ pub async fn on_did_change_watched_files(
                 let emmyrc_path = uri_to_file_path(&file_event.uri).unwrap();
                 let file_dir = emmyrc_path.parent().unwrap().to_path_buf();
                 context
-                    .config_manager
+                    .workspace_manager()
                     .read()
                     .await
                     .add_update_emmyrc_task(file_dir)
@@ -54,7 +71,7 @@ pub async fn on_did_change_watched_files(
 
     let file_ids = analysis.update_files_by_uri(watched_lua_files);
     context
-        .file_diagnostic
+        .file_diagnostic()
         .add_files_diagnostic_task(file_ids, interval)
         .await;
 
@@ -70,8 +87,9 @@ fn collect_lua_files(
     match file_change_event {
         FileChangeType::CREATED | FileChangeType::CHANGED => {
             let path = uri_to_file_path(&uri).unwrap();
-            let text = read_file_with_encoding(&path, encoding).unwrap();
-            watched_lua_files.push((uri, Some(text)));
+            if let Some(text) = read_file_with_encoding(&path, encoding) {
+                watched_lua_files.push((uri, Some(text)));
+            }
         }
         FileChangeType::DELETED => {
             watched_lua_files.push((uri, None));

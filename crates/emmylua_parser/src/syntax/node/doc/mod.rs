@@ -1,15 +1,19 @@
-mod tag;
-mod types;
 mod description;
+mod tag;
 mod test;
+mod types;
 
 pub use description::*;
 pub use tag::*;
 pub use types::*;
 
-use super::{LuaAst, LuaBinaryOpToken, LuaNameToken, LuaNumberToken, LuaStringToken};
+use super::{
+    LuaAst, LuaBinaryOpToken, LuaLiteralToken, LuaNameToken, LuaNumberToken, LuaStringToken,
+};
 use crate::{
-    kind::{LuaSyntaxKind, LuaTokenKind}, syntax::traits::LuaAstNode, LuaAstChildren, LuaAstToken, LuaAstTokenChildren, LuaKind, LuaSyntaxNode
+    LuaAstChildren, LuaAstToken, LuaAstTokenChildren, LuaKind, LuaSyntaxNode,
+    kind::{LuaSyntaxKind, LuaTokenKind},
+    syntax::traits::LuaAstNode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,7 +45,18 @@ impl LuaAstNode for LuaComment {
     }
 }
 
-impl LuaDocDescriptionOwner for LuaComment {}
+/// 检查语法节点是否为附加性质的文档标签
+///
+/// 附加性质的标签不会阻止查找 DocDescription
+fn is_additive_doc_tag(kind: LuaSyntaxKind) -> bool {
+    matches!(
+        kind,
+        LuaSyntaxKind::DocTagVisibility
+            | LuaSyntaxKind::DocTagExport
+            | LuaSyntaxKind::DocTagVersion
+            | LuaSyntaxKind::DocTagNodiscard
+    )
+}
 
 impl LuaComment {
     pub fn get_owner(&self) -> Option<LuaAst> {
@@ -57,14 +72,30 @@ impl LuaComment {
     pub fn get_doc_tags(&self) -> LuaAstChildren<LuaDocTag> {
         self.children()
     }
+
+    pub fn get_description(&self) -> Option<LuaDocDescription> {
+        for child in self.syntax.children_with_tokens() {
+            match child.kind() {
+                LuaKind::Syntax(LuaSyntaxKind::DocDescription) => {
+                    return LuaDocDescription::cast(child.into_node().unwrap());
+                }
+                LuaKind::Token(LuaTokenKind::TkDocStart) => {}
+                LuaKind::Syntax(syntax_kind) => {
+                    if !is_additive_doc_tag(syntax_kind) {
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
 }
 
 fn find_inline_node(comment: &LuaSyntaxNode) -> Option<LuaSyntaxNode> {
     let mut prev_sibling = comment.prev_sibling_or_token();
     loop {
-        if prev_sibling.is_none() {
-            return None;
-        }
+        prev_sibling.as_ref()?;
 
         if let Some(sibling) = prev_sibling {
             match sibling.kind() {
@@ -76,14 +107,14 @@ fn find_inline_node(comment: &LuaSyntaxNode) -> Option<LuaSyntaxNode> {
                     return None;
                 }
                 LuaKind::Token(k) if k != LuaTokenKind::TkName => {
-                    return Some(comment.parent()?);
+                    return comment.parent();
                 }
                 _ => match sibling {
                     rowan::NodeOrToken::Node(node) => {
                         return Some(node);
                     }
                     rowan::NodeOrToken::Token(token) => {
-                        return Some(token.parent()?);
+                        return token.parent();
                     }
                 },
             }
@@ -99,9 +130,7 @@ fn find_attached_node(comment: &LuaSyntaxNode) -> Option<LuaSyntaxNode> {
 
     let mut next_sibling = comment.next_sibling_or_token();
     loop {
-        if next_sibling.is_none() {
-            return None;
-        }
+        next_sibling.as_ref()?;
 
         if let Some(sibling) = next_sibling {
             match sibling.kind() {
@@ -128,7 +157,7 @@ fn find_attached_node(comment: &LuaSyntaxNode) -> Option<LuaSyntaxNode> {
                         return Some(node);
                     }
                     rowan::NodeOrToken::Token(token) => {
-                        return Some(token.parent()?);
+                        return token.parent();
                     }
                 },
             }
@@ -209,6 +238,10 @@ impl LuaDocGenericDecl {
     pub fn get_type(&self) -> Option<LuaDocType> {
         self.child()
     }
+
+    pub fn is_variadic(&self) -> bool {
+        self.token_by_kind(LuaTokenKind::TkDots).is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -242,6 +275,10 @@ impl LuaAstNode for LuaDocTypeList {
 
 impl LuaDocTypeList {
     pub fn get_types(&self) -> LuaAstChildren<LuaDocType> {
+        self.children()
+    }
+
+    pub fn get_return_type_list(&self) -> LuaAstChildren<LuaDocNamedReturnType> {
         self.children()
     }
 }
@@ -323,16 +360,25 @@ impl LuaDocObjectField {
         for child in self.syntax.children_with_tokens() {
             match child.kind() {
                 LuaKind::Token(LuaTokenKind::TkName) => {
-                    return LuaNameToken::cast(child.into_token().unwrap()).map(LuaDocObjectFieldKey::Name);
-                }
-                LuaKind::Token(LuaTokenKind::TkString) => {
-                    return LuaStringToken::cast(child.into_token().unwrap()).map(LuaDocObjectFieldKey::String);
-                }
-                LuaKind::Token(LuaTokenKind::TkInt) => {
-                    return LuaNumberToken::cast(child.into_token().unwrap()).map(LuaDocObjectFieldKey::Integer);
+                    return LuaNameToken::cast(child.into_token().unwrap())
+                        .map(LuaDocObjectFieldKey::Name);
                 }
                 kind if LuaDocType::can_cast(kind.into()) => {
-                    return LuaDocType::cast(child.into_node().unwrap()).map(LuaDocObjectFieldKey::Type);
+                    let doc_type = LuaDocType::cast(child.into_node().unwrap())?;
+                    if let LuaDocType::Literal(literal) = &doc_type {
+                        let literal = literal.get_literal()?;
+                        match literal {
+                            LuaLiteralToken::Number(num) => {
+                                return Some(LuaDocObjectFieldKey::Integer(num));
+                            }
+                            LuaLiteralToken::String(str) => {
+                                return Some(LuaDocObjectFieldKey::String(str));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    return LuaDocObjectFieldKey::Type(doc_type).into();
                 }
                 LuaKind::Token(LuaTokenKind::TkColon) => {
                     return None;
@@ -393,5 +439,51 @@ impl LuaAstNode for LuaDocAttribute {
 impl LuaDocAttribute {
     pub fn get_attrib_tokens(&self) -> LuaAstTokenChildren<LuaNameToken> {
         self.tokens()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LuaDocNamedReturnType {
+    syntax: LuaSyntaxNode,
+}
+
+impl LuaAstNode for LuaDocNamedReturnType {
+    fn syntax(&self) -> &LuaSyntaxNode {
+        &self.syntax
+    }
+
+    fn can_cast(kind: LuaSyntaxKind) -> bool
+    where
+        Self: Sized,
+    {
+        kind == LuaSyntaxKind::DocNamedReturnType
+    }
+
+    fn cast(syntax: LuaSyntaxNode) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        if Self::can_cast(syntax.kind().into()) {
+            Some(Self { syntax })
+        } else {
+            None
+        }
+    }
+}
+
+impl LuaDocNamedReturnType {
+    pub fn get_name_and_type(&self) -> (Option<LuaNameToken>, Option<LuaDocType>) {
+        let types = self.children().collect::<Vec<LuaDocType>>();
+        if types.len() == 1 {
+            (None, Some(types[0].clone()))
+        } else if types.len() == 2 {
+            if let LuaDocType::Name(name) = &types[0] {
+                (name.get_name_token(), Some(types[1].clone()))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        }
     }
 }

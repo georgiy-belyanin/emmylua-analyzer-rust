@@ -1,4 +1,4 @@
-use lsp_types::{request::Request, Range};
+use lsp_types::{Range, request::Request};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ impl Request for EmmyAnnotatorRequest {
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 pub struct EmmyAnnotatorParams {
-    pub uri: String
+    pub uri: String,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
@@ -30,6 +30,8 @@ pub enum EmmyAnnotatorType {
     ReadOnlyLocal = 2,
     MutLocal = 3,
     MutParam = 4,
+    DocEm = 5,
+    DocStrong = 6,
 }
 
 impl From<EmmyAnnotatorType> for u8 {
@@ -46,6 +48,8 @@ impl From<u8> for EmmyAnnotatorType {
             2 => EmmyAnnotatorType::ReadOnlyLocal,
             3 => EmmyAnnotatorType::MutLocal,
             4 => EmmyAnnotatorType::MutParam,
+            5 => EmmyAnnotatorType::DocEm,
+            6 => EmmyAnnotatorType::DocStrong,
             _ => EmmyAnnotatorType::ReadOnlyLocal,
         }
     }

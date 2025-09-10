@@ -1,16 +1,16 @@
 use crate::{
-    kind::{LuaSyntaxKind, LuaTokenKind},
+    LuaAstToken, LuaGeneralToken, LuaLocalAttribute, LuaSyntaxNode,
+    kind::LuaSyntaxKind,
     syntax::{
-        comment_trait::LuaCommentOwner,
+        LuaCommentOwner,
         node::LuaNameToken,
         traits::{LuaAstChildren, LuaAstNode, LuaAstTokenChildren},
     },
-    LuaSyntaxNode,
 };
 
 use super::{
-    expr::{LuaCallExpr, LuaClosureExpr, LuaExpr, LuaVarExpr},
     LuaBlock, LuaLocalName,
+    expr::{LuaCallExpr, LuaClosureExpr, LuaExpr, LuaVarExpr},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -31,6 +31,7 @@ pub enum LuaStat {
     GotoStat(LuaGotoStat),
     LabelStat(LuaLabelStat),
     EmptyStat(LuaEmptyStat),
+    GlobalStat(LuaGlobalStat),
 }
 
 impl LuaAstNode for LuaStat {
@@ -52,6 +53,7 @@ impl LuaAstNode for LuaStat {
             LuaStat::GotoStat(node) => node.syntax(),
             LuaStat::LabelStat(node) => node.syntax(),
             LuaStat::EmptyStat(node) => node.syntax(),
+            LuaStat::GlobalStat(node) => node.syntax(),
         }
     }
 
@@ -76,6 +78,7 @@ impl LuaAstNode for LuaStat {
             LuaSyntaxKind::GotoStat => true,
             LuaSyntaxKind::LabelStat => true,
             LuaSyntaxKind::EmptyStat => true,
+            LuaSyntaxKind::GlobalStat => true,
             _ => false,
         }
     }
@@ -107,6 +110,7 @@ impl LuaAstNode for LuaStat {
             LuaSyntaxKind::GotoStat => Some(LuaStat::GotoStat(LuaGotoStat::cast(syntax)?)),
             LuaSyntaxKind::LabelStat => Some(LuaStat::LabelStat(LuaLabelStat::cast(syntax)?)),
             LuaSyntaxKind::EmptyStat => Some(LuaStat::EmptyStat(LuaEmptyStat::cast(syntax)?)),
+            LuaSyntaxKind::GlobalStat => Some(LuaStat::GlobalStat(LuaGlobalStat::cast(syntax)?)),
             _ => None,
         }
     }
@@ -115,6 +119,61 @@ impl LuaAstNode for LuaStat {
 impl LuaCommentOwner for LuaStat {}
 
 impl LuaStat {
+    pub fn get_parent_block(&self) -> Option<LuaBlock> {
+        LuaBlock::cast(self.syntax().parent()?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LuaLoopStat {
+    WhileStat(LuaWhileStat),
+    RepeatStat(LuaRepeatStat),
+    ForStat(LuaForStat),
+    ForRangeStat(LuaForRangeStat),
+}
+
+impl LuaAstNode for LuaLoopStat {
+    fn syntax(&self) -> &LuaSyntaxNode {
+        match self {
+            LuaLoopStat::WhileStat(node) => node.syntax(),
+            LuaLoopStat::RepeatStat(node) => node.syntax(),
+            LuaLoopStat::ForStat(node) => node.syntax(),
+            LuaLoopStat::ForRangeStat(node) => node.syntax(),
+        }
+    }
+
+    fn can_cast(kind: LuaSyntaxKind) -> bool
+    where
+        Self: Sized,
+    {
+        match kind {
+            LuaSyntaxKind::WhileStat => true,
+            LuaSyntaxKind::RepeatStat => true,
+            LuaSyntaxKind::ForStat => true,
+            LuaSyntaxKind::ForRangeStat => true,
+            _ => false,
+        }
+    }
+
+    fn cast(syntax: LuaSyntaxNode) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        if let Some(node) = LuaWhileStat::cast(syntax.clone()) {
+            Some(LuaLoopStat::WhileStat(node))
+        } else if let Some(node) = LuaRepeatStat::cast(syntax.clone()) {
+            Some(LuaLoopStat::RepeatStat(node))
+        } else if let Some(node) = LuaForStat::cast(syntax.clone()) {
+            Some(LuaLoopStat::ForStat(node))
+        } else {
+            LuaForRangeStat::cast(syntax.clone()).map(LuaLoopStat::ForRangeStat)
+        }
+    }
+}
+
+impl LuaCommentOwner for LuaLoopStat {}
+
+impl LuaLoopStat {
     pub fn get_parent_block(&self) -> Option<LuaBlock> {
         LuaBlock::cast(self.syntax().parent()?)
     }
@@ -159,6 +218,24 @@ impl LuaLocalStat {
     pub fn get_value_exprs(&self) -> LuaAstChildren<LuaExpr> {
         self.children()
     }
+
+    pub fn get_local_name_by_value(&self, value: LuaExpr) -> Option<LuaLocalName> {
+        let local_names = self.get_local_name_list();
+        let value_exprs = self.get_value_exprs().collect::<Vec<_>>();
+
+        for (i, local_name) in local_names.enumerate() {
+            if let Some(value_expr) = value_exprs.get(i) {
+                if value_expr.syntax() == value.syntax() {
+                    return Some(local_name);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_attrib(&self) -> Option<LuaLocalAttribute> {
+        self.child()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -198,7 +275,7 @@ impl LuaAssignStat {
         let mut exprs = Vec::new();
         let mut meet_assign = false;
         for child in self.syntax.children_with_tokens() {
-            if child.kind() == LuaTokenKind::TkAssign.into() {
+            if child.kind().to_token().is_assign_op() {
                 meet_assign = true;
             }
 
@@ -207,15 +284,24 @@ impl LuaAssignStat {
                     if let Some(var) = LuaExpr::cast(node) {
                         exprs.push(var);
                     }
-                } else {
-                    if let Some(var) = LuaVarExpr::cast(node) {
-                        vars.push(var);
-                    }
+                } else if let Some(var) = LuaVarExpr::cast(node) {
+                    vars.push(var);
                 }
             }
         }
 
         (vars, exprs)
+    }
+
+    pub fn get_assign_op(&self) -> Option<LuaGeneralToken> {
+        for child in self.syntax.children_with_tokens() {
+            if let Some(token) = child.into_token() {
+                if token.kind().to_token().is_assign_op() {
+                    return LuaGeneralToken::cast(token);
+                }
+            }
+        }
+        None
     }
 }
 
@@ -377,11 +463,11 @@ impl LuaIfStat {
     pub fn get_block(&self) -> Option<LuaBlock> {
         self.child()
     }
-    
+
     pub fn get_else_if_clause_list(&self) -> LuaAstChildren<LuaElseIfClauseStat> {
         self.children()
     }
-    
+
     pub fn get_else_clause(&self) -> Option<LuaElseClauseStat> {
         self.child()
     }
@@ -485,13 +571,15 @@ impl LuaAstNode for LuaIfClauseStat {
 
     fn can_cast(kind: LuaSyntaxKind) -> bool
     where
-        Self: Sized {
+        Self: Sized,
+    {
         LuaElseIfClauseStat::can_cast(kind) || LuaElseClauseStat::can_cast(kind)
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         if LuaElseIfClauseStat::can_cast(syntax.kind().into()) {
             Some(LuaIfClauseStat::ElseIf(LuaElseIfClauseStat::cast(syntax)?))
         } else if LuaElseClauseStat::can_cast(syntax.kind().into()) {
@@ -905,3 +993,44 @@ impl LuaAstNode for LuaEmptyStat {
 }
 
 impl LuaCommentOwner for LuaEmptyStat {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LuaGlobalStat {
+    syntax: LuaSyntaxNode,
+}
+
+impl LuaAstNode for LuaGlobalStat {
+    fn syntax(&self) -> &LuaSyntaxNode {
+        &self.syntax
+    }
+
+    fn can_cast(kind: LuaSyntaxKind) -> bool
+    where
+        Self: Sized,
+    {
+        kind == LuaSyntaxKind::GlobalStat
+    }
+
+    fn cast(syntax: LuaSyntaxNode) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        if syntax.kind() == LuaSyntaxKind::GlobalStat.into() {
+            Some(Self { syntax })
+        } else {
+            None
+        }
+    }
+}
+
+impl LuaCommentOwner for LuaGlobalStat {}
+
+impl LuaGlobalStat {
+    pub fn get_local_name_list(&self) -> LuaAstChildren<LuaLocalName> {
+        self.children()
+    }
+
+    pub fn get_attrib(&self) -> Option<LuaLocalAttribute> {
+        self.child()
+    }
+}

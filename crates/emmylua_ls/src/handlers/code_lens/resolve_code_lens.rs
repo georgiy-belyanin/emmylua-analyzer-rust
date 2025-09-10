@@ -1,4 +1,4 @@
-use code_analysis::LuaCompilation;
+use emmylua_code_analysis::LuaCompilation;
 use lsp_types::{CodeLens, Command, Location, Range, Uri};
 
 use crate::{
@@ -44,7 +44,7 @@ pub fn resolve_code_lens(
             let file_id = decl_id.file_id;
             let mut semantic_model = compilation.get_semantic_model(file_id)?;
             let mut results = Vec::new();
-            search_decl_references(&mut semantic_model, decl_id, &mut results);
+            search_decl_references(&mut semantic_model, compilation, decl_id, &mut results);
             let ref_count = results.len();
             let uri = semantic_model.get_document().get_uri();
             let command = make_usage_command(uri, code_lens.range, ref_count, client_id, results);
@@ -71,7 +71,11 @@ fn make_usage_command(
     client_id: ClientId,
     refs: Vec<Location>,
 ) -> Command {
-    let title = format!("{} usage", ref_count);
+    let title = format!(
+        "{} usage{}",
+        ref_count,
+        if ref_count == 1 { "" } else { "s" }
+    );
     let mut args = Vec::new();
     args.push(serde_json::to_value(uri).unwrap());
     args.push(serde_json::to_value(range.start).unwrap());

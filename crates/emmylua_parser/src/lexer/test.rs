@@ -1,6 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::{lexer::{LexerConfig, LuaLexer}, parser_error::LuaParseError};
+    use crate::text::Reader;
+    use crate::{
+        LuaNonStdSymbol,
+        lexer::{LexerConfig, LuaLexer},
+        parser_error::LuaParseError,
+    };
 
     #[test]
     fn test_all_lua_token() {
@@ -79,13 +84,17 @@ mod tests {
         "#;
         let config = LexerConfig::default();
         let mut errors: Vec<LuaParseError> = Vec::new();
-        let mut lexer = LuaLexer::new(text, config, &mut errors);
+        let mut lexer = LuaLexer::new(Reader::new(text), config, Some(&mut errors));
         let tokens = lexer.tokenize();
         // for token in &tokens {
         //     println!("{:?}", token);
         // }
-        
-        let test_str = tokens.iter().map(|x| format!("{:?}", x)).collect::<Vec<String>>().join("\n");
+
+        let test_str = tokens
+            .iter()
+            .map(|x| format!("{:?}", x))
+            .collect::<Vec<String>>()
+            .join("\n");
         let expected = r#"
 LuaTokenData { kind: TkShebang, range: SourceRange { start_offset: 0, length: 19 } }
 LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 19, length: 1 } }
@@ -1081,5 +1090,192 @@ LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 2036, leng
         "#;
 
         assert_eq!(expected.trim(), test_str);
+    }
+
+    #[test]
+    fn test_non_std_tokens() {
+        let text = r#"#! /usr/bin/env lua
+        // bbbbb
+        /*
+        afafaf
+        */
+        a `b`
+        a += 1
+        a -= 2
+        a *= 3
+        a /= 4
+        a %= 5
+        a ^= 6
+        a //= 7
+        a |= 8
+        a &= 9
+        a <<= 10
+        a >>= 11
+        a || b
+        a && b
+        !a
+        a != b
+        continue
+        "#;
+
+        let mut config = LexerConfig::default();
+        config.non_std_symbols.extends(vec![
+            LuaNonStdSymbol::DoubleSlash,
+            LuaNonStdSymbol::SlashStar,
+            LuaNonStdSymbol::Backtick,
+            LuaNonStdSymbol::PlusAssign,
+            LuaNonStdSymbol::MinusAssign,
+            LuaNonStdSymbol::StarAssign,
+            LuaNonStdSymbol::SlashAssign,
+            LuaNonStdSymbol::PercentAssign,
+            LuaNonStdSymbol::CaretAssign,
+            LuaNonStdSymbol::DoubleSlashAssign,
+            LuaNonStdSymbol::PipeAssign,
+            LuaNonStdSymbol::AmpAssign,
+            LuaNonStdSymbol::ShiftLeftAssign,
+            LuaNonStdSymbol::ShiftRightAssign,
+            LuaNonStdSymbol::DoublePipe,
+            LuaNonStdSymbol::DoubleAmp,
+            LuaNonStdSymbol::Exclamation,
+            LuaNonStdSymbol::NotEqual,
+            LuaNonStdSymbol::Continue,
+        ]);
+
+        let mut errors: Vec<LuaParseError> = Vec::new();
+        let mut lexer = LuaLexer::new(Reader::new(text), config, Some(&mut errors));
+        let tokens = lexer.tokenize();
+
+        let test_str = tokens
+            .iter()
+            .map(|x| format!("{:?}", x))
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        let expected = r#"
+LuaTokenData { kind: TkShebang, range: SourceRange { start_offset: 0, length: 19 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 19, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 20, length: 8 } }
+LuaTokenData { kind: TkShortComment, range: SourceRange { start_offset: 28, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 30, length: 1 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 31, length: 5 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 36, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 37, length: 8 } }
+LuaTokenData { kind: TkLongComment, range: SourceRange { start_offset: 45, length: 28 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 73, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 74, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 82, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 83, length: 1 } }
+LuaTokenData { kind: TkString, range: SourceRange { start_offset: 84, length: 3 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 87, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 88, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 96, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 97, length: 1 } }
+LuaTokenData { kind: TkPlusAssign, range: SourceRange { start_offset: 98, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 100, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 101, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 102, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 103, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 111, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 112, length: 1 } }
+LuaTokenData { kind: TkMinusAssign, range: SourceRange { start_offset: 113, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 115, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 116, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 117, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 118, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 126, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 127, length: 1 } }
+LuaTokenData { kind: TkStarAssign, range: SourceRange { start_offset: 128, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 130, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 131, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 132, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 133, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 141, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 142, length: 1 } }
+LuaTokenData { kind: TkSlashAssign, range: SourceRange { start_offset: 143, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 145, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 146, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 147, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 148, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 156, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 157, length: 1 } }
+LuaTokenData { kind: TkPercentAssign, range: SourceRange { start_offset: 158, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 160, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 161, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 162, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 163, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 171, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 172, length: 1 } }
+LuaTokenData { kind: TkCaretAssign, range: SourceRange { start_offset: 173, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 175, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 176, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 177, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 178, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 186, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 187, length: 1 } }
+LuaTokenData { kind: TkShortComment, range: SourceRange { start_offset: 188, length: 2 } }
+LuaTokenData { kind: TkAssign, range: SourceRange { start_offset: 190, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 191, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 192, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 193, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 194, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 202, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 203, length: 1 } }
+LuaTokenData { kind: TkPipeAssign, range: SourceRange { start_offset: 204, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 206, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 207, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 208, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 209, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 217, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 218, length: 1 } }
+LuaTokenData { kind: TkAmpAssign, range: SourceRange { start_offset: 219, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 221, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 222, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 223, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 224, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 232, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 233, length: 1 } }
+LuaTokenData { kind: TkShiftLeftAssign, range: SourceRange { start_offset: 234, length: 3 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 237, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 238, length: 2 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 240, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 241, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 249, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 250, length: 1 } }
+LuaTokenData { kind: TkShiftRightAssign, range: SourceRange { start_offset: 251, length: 3 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 254, length: 1 } }
+LuaTokenData { kind: TkInt, range: SourceRange { start_offset: 255, length: 2 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 257, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 258, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 266, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 267, length: 1 } }
+LuaTokenData { kind: TkOr, range: SourceRange { start_offset: 268, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 270, length: 1 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 271, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 272, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 273, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 281, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 282, length: 1 } }
+LuaTokenData { kind: TkAnd, range: SourceRange { start_offset: 283, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 285, length: 1 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 286, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 287, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 288, length: 8 } }
+LuaTokenData { kind: TkNot, range: SourceRange { start_offset: 296, length: 1 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 297, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 298, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 299, length: 8 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 307, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 308, length: 1 } }
+LuaTokenData { kind: TkNe, range: SourceRange { start_offset: 309, length: 2 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 311, length: 1 } }
+LuaTokenData { kind: TkName, range: SourceRange { start_offset: 312, length: 1 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 313, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 314, length: 8 } }
+LuaTokenData { kind: TkBreak, range: SourceRange { start_offset: 322, length: 8 } }
+LuaTokenData { kind: TkEndOfLine, range: SourceRange { start_offset: 330, length: 1 } }
+LuaTokenData { kind: TkWhitespace, range: SourceRange { start_offset: 331, length: 8 } }
+        "#;
+
+        assert_eq!(expected.trim(), test_str.trim());
     }
 }

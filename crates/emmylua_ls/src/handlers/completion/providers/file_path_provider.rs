@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use code_analysis::file_path_to_uri;
+use emmylua_code_analysis::file_path_to_uri;
 use emmylua_parser::{LuaAstToken, LuaStringToken};
-use lsp_types::CompletionItem;
+use lsp_types::{CompletionItem, TextEdit};
 
 use crate::handlers::completion::completion_builder::CompletionBuilder;
+
+use super::get_text_edit_range_in_string;
 
 pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     if builder.is_cancelled() {
@@ -27,6 +29,7 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     let resources = builder.semantic_model.get_emmyrc().resource.paths.clone();
 
     let suffix = prefix;
+    let text_edit_range = get_text_edit_range_in_string(builder, string_token)?;
 
     for resource in resources {
         let path = Path::new(&resource);
@@ -36,7 +39,7 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        add_file_path_completion(builder, &path, name, prefix);
+                        add_file_path_completion(builder, &path, name, prefix, text_edit_range);
                     }
                 }
             }
@@ -53,6 +56,7 @@ fn add_file_path_completion(
     path: &PathBuf,
     name: &str,
     prefix: &str,
+    text_edit_range: lsp_types::Range,
 ) -> Option<()> {
     let kind: lsp_types::CompletionItemKind = if path.is_dir() {
         lsp_types::CompletionItemKind::FOLDER
@@ -66,11 +70,15 @@ fn add_file_path_completion(
     };
 
     let filter_text = format!("{}{}", prefix, name);
+    let text_edit = TextEdit {
+        range: text_edit_range.clone(),
+        new_text: filter_text.clone(),
+    };
     let completion_item = CompletionItem {
         label: name.to_string(),
         kind: Some(kind),
         filter_text: Some(filter_text.clone()),
-        insert_text: Some(filter_text),
+        text_edit: Some(lsp_types::CompletionTextEdit::Edit(text_edit)),
         detail,
         ..Default::default()
     };

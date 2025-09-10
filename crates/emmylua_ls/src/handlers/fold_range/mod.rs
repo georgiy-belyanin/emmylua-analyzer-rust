@@ -1,12 +1,12 @@
 mod builder;
 mod comment;
 mod expr;
-mod stats;
 mod imports;
+mod stats;
 
 use builder::FoldingRangeBuilder;
-use code_analysis::Emmyrc;
 use comment::build_comment_fold_range;
+use emmylua_code_analysis::Emmyrc;
 use emmylua_parser::{LuaAst, LuaAstNode};
 use expr::{build_closure_expr_fold_range, build_string_fold_range, build_table_expr_fold_range};
 use imports::build_imports_fold_range;
@@ -16,12 +16,13 @@ use lsp_types::{
 };
 use stats::{
     build_do_stat_fold_range, build_for_range_stat_fold_range, build_for_stat_fold_range,
-    build_func_stat_fold_range, build_if_stat_fold_range, build_local_func_stat_fold_range,
-    build_repeat_stat_fold_range, build_while_stat_fold_range,
+    build_if_stat_fold_range, build_repeat_stat_fold_range, build_while_stat_fold_range,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ServerContextSnapshot;
+
+use super::RegisterCapabilities;
 
 pub async fn on_folding_range_handler(
     context: ServerContextSnapshot,
@@ -29,13 +30,20 @@ pub async fn on_folding_range_handler(
     _: CancellationToken,
 ) -> Option<Vec<FoldingRange>> {
     let uri = params.text_document.uri;
-    let analysis = context.analysis.read().await;
+    let analysis = context.analysis().read().await;
+    let client_id = context
+        .workspace_manager()
+        .read()
+        .await
+        .client_config
+        .client_id;
     let file_id = analysis.get_file_id(&uri)?;
     let semantic_model = analysis.compilation.get_semantic_model(file_id)?;
     let document = semantic_model.get_document();
     let root = semantic_model.get_root();
     let emmyrc = semantic_model.get_emmyrc();
-    let mut builder = FoldingRangeBuilder::new(&document, root.clone());
+
+    let mut builder = FoldingRangeBuilder::new(&document, root.clone(), client_id);
     build_folding_ranges(&mut builder, emmyrc);
     Some(builder.build())
 }
@@ -59,12 +67,6 @@ fn build_folding_ranges(builder: &mut FoldingRangeBuilder, emmyrc: &Emmyrc) {
             LuaAst::LuaDoStat(do_stat) => {
                 build_do_stat_fold_range(builder, do_stat);
             }
-            LuaAst::LuaLocalFuncStat(local_func_stat) => {
-                build_local_func_stat_fold_range(builder, local_func_stat);
-            }
-            LuaAst::LuaFuncStat(func_stat) => {
-                build_func_stat_fold_range(builder, func_stat);
-            }
             LuaAst::LuaTableExpr(table_expr) => {
                 build_table_expr_fold_range(builder, table_expr);
             }
@@ -87,10 +89,11 @@ fn build_folding_ranges(builder: &mut FoldingRangeBuilder, emmyrc: &Emmyrc) {
     build_imports_fold_range(builder, root, emmyrc);
 }
 
-pub fn register_capabilities(
-    server_capabilities: &mut ServerCapabilities,
-    _: &ClientCapabilities,
-) -> Option<()> {
-    server_capabilities.folding_range_provider = Some(FoldingRangeProviderCapability::Simple(true));
-    Some(())
+pub struct FoldRangeCapabilities;
+
+impl RegisterCapabilities for FoldRangeCapabilities {
+    fn register_capabilities(server_capabilities: &mut ServerCapabilities, _: &ClientCapabilities) {
+        server_capabilities.folding_range_provider =
+            Some(FoldingRangeProviderCapability::Simple(true));
+    }
 }

@@ -1,4 +1,5 @@
 mod lua_language_level;
+mod lua_non_std_symbol;
 mod lua_operator_kind;
 mod lua_syntax_kind;
 mod lua_token_kind;
@@ -7,16 +8,15 @@ mod lua_version;
 mod lua_visibility_kind;
 
 pub use lua_language_level::LuaLanguageLevel;
-pub use lua_operator_kind::{BinaryOperator, UnaryOperator, UNARY_PRIORITY};
+pub use lua_non_std_symbol::{LuaNonStdSymbol, LuaNonStdSymbolSet};
+pub use lua_operator_kind::{BinaryOperator, UNARY_PRIORITY, UnaryOperator};
 pub use lua_syntax_kind::LuaSyntaxKind;
 pub use lua_token_kind::LuaTokenKind;
 pub use lua_type_operator_kind::{
-    LuaTypeBinaryOperator, LuaTypeTernaryOperator, LuaTypeUnaryOperator,
+    LuaTypeBinaryOperator, LuaTypeTernaryOperator, LuaTypeUnaryOperator, UNARY_TYPE_PRIORITY,
 };
-pub use lua_version::{LuaVersionNumber, LuaVersionCondition};
+pub use lua_version::{LuaVersionCondition, LuaVersionNumber};
 pub use lua_visibility_kind::VisibilityKind;
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
@@ -37,18 +37,18 @@ impl From<LuaTokenKind> for LuaKind {
     }
 }
 
-impl Into<LuaSyntaxKind> for LuaKind {
-    fn into(self) -> LuaSyntaxKind {
-        match self {
+impl From<LuaKind> for LuaSyntaxKind {
+    fn from(val: LuaKind) -> Self {
+        match val {
             LuaKind::Syntax(kind) => kind,
             _ => LuaSyntaxKind::None,
         }
     }
 }
 
-impl Into<LuaTokenKind> for LuaKind {
-    fn into(self) -> LuaTokenKind {
-        match self {
+impl From<LuaKind> for LuaTokenKind {
+    fn from(val: LuaKind) -> Self {
+        match val {
             LuaKind::Token(kind) => kind,
             _ => LuaTokenKind::None,
         }
@@ -62,6 +62,20 @@ impl LuaKind {
 
     pub fn is_token(self) -> bool {
         matches!(self, LuaKind::Token(_))
+    }
+
+    pub fn to_syntax(self) -> LuaSyntaxKind {
+        match self {
+            LuaKind::Syntax(kind) => kind,
+            LuaKind::Token(_) => LuaSyntaxKind::None,
+        }
+    }
+
+    pub fn to_token(self) -> LuaTokenKind {
+        match self {
+            LuaKind::Token(kind) => kind,
+            LuaKind::Syntax(_) => LuaTokenKind::None,
+        }
     }
 
     pub fn get_raw(self) -> u16 {
@@ -167,6 +181,7 @@ impl LuaOpKind {
     pub fn to_type_unary_operator(kind: LuaTokenKind) -> LuaTypeUnaryOperator {
         match kind {
             LuaTokenKind::TkDocKeyOf => LuaTypeUnaryOperator::Keyof,
+            LuaTokenKind::TkMinus => LuaTypeUnaryOperator::Neg,
             _ => LuaTypeUnaryOperator::None,
         }
     }
@@ -177,6 +192,8 @@ impl LuaOpKind {
             LuaTokenKind::TkDocAnd => LuaTypeBinaryOperator::Intersection,
             LuaTokenKind::TkIn => LuaTypeBinaryOperator::In,
             LuaTokenKind::TkDocExtends => LuaTypeBinaryOperator::Extends,
+            LuaTokenKind::TkPlus => LuaTypeBinaryOperator::Add,
+            LuaTokenKind::TkMinus => LuaTypeBinaryOperator::Sub,
             _ => LuaTypeBinaryOperator::None,
         }
     }
@@ -187,6 +204,8 @@ impl LuaOpKind {
             LuaTokenKind::TkDocAnd => LuaTypeBinaryOperator::Intersection,
             LuaTokenKind::TkIn => LuaTypeBinaryOperator::In,
             LuaTokenKind::TkDocExtends => LuaTypeBinaryOperator::Extends,
+            LuaTokenKind::TkPlus => LuaTypeBinaryOperator::Add,
+            LuaTokenKind::TkMinus => LuaTypeBinaryOperator::Sub,
             _ => LuaTypeBinaryOperator::None,
         }
     }

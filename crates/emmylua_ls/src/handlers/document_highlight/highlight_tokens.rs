@@ -1,18 +1,21 @@
-use code_analysis::{LuaDeclId, LuaDocument, LuaPropertyOwnerId, SemanticModel};
+use emmylua_code_analysis::{
+    LuaDeclId, LuaDocument, LuaSemanticDeclId, SemanticDeclLevel, SemanticModel,
+};
 use emmylua_parser::{LuaAstNode, LuaSyntaxKind, LuaSyntaxNode, LuaSyntaxToken, LuaTokenKind};
 use lsp_types::{DocumentHighlight, DocumentHighlightKind};
 use rowan::NodeOrToken;
 
 pub fn highlight_tokens(
-    semantic_model: &mut SemanticModel,
+    semantic_model: &SemanticModel,
     token: LuaSyntaxToken,
 ) -> Option<Vec<DocumentHighlight>> {
     let mut result = Vec::new();
     match token.kind().into() {
         LuaTokenKind::TkName => {
-            let property_owner = semantic_model.get_property_owner_id(token.clone().into());
-            match property_owner {
-                Some(LuaPropertyOwnerId::LuaDecl(decl_id)) => {
+            let semantic_decl =
+                semantic_model.find_decl(token.clone().into(), SemanticDeclLevel::NoTrace);
+            match semantic_decl {
+                Some(LuaSemanticDeclId::LuaDecl(decl_id)) => {
                     highlight_decl_references(&semantic_model, decl_id, token, &mut result);
                 }
                 _ => {
@@ -42,14 +45,19 @@ fn highlight_decl_references(
         .get_decl(&decl_id)?;
     let document = semantic_model.get_document();
     if decl.is_local() {
-        let local_references = semantic_model
+        let decl_refs = semantic_model
             .get_db()
             .get_reference_index()
-            .get_local_references(&decl_id.file_id, &decl_id)?;
+            .get_decl_references(&decl_id.file_id, &decl_id)?;
 
-        for reference_range in local_references {
-            let range: lsp_types::Range = document.to_lsp_range(reference_range.clone())?;
-            result.push(DocumentHighlight { range, kind: None });
+        for decl_ref in &decl_refs.cells {
+            let range: lsp_types::Range = document.to_lsp_range(decl_ref.range.clone())?;
+            let kind = if decl_ref.is_write {
+                Some(DocumentHighlightKind::WRITE)
+            } else {
+                Some(DocumentHighlightKind::READ)
+            };
+            result.push(DocumentHighlight { range, kind });
         }
 
         let range = document.to_lsp_range(decl.get_range())?;

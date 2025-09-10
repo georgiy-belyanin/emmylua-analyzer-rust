@@ -35,8 +35,8 @@ impl MarkerEventContainer for LuaDocParser<'_, '_> {
     }
 }
 
-impl LuaDocParser<'_, '_> {
-    pub fn parse<'a, 'b>(lua_parser: &'a mut LuaParser<'b>, tokens: &[LuaTokenData]) {
+impl<'b> LuaDocParser<'_, 'b> {
+    pub fn parse(lua_parser: &mut LuaParser<'_>, tokens: &[LuaTokenData]) {
         let lexer = LuaDocLexer::new(lua_parser.origin_text());
 
         let mut parser = LuaDocParser {
@@ -74,9 +74,7 @@ impl LuaDocParser<'_, '_> {
     fn calc_next_current_token(&mut self) {
         let token = self.lex_token();
         self.current_token = token.kind;
-        if !token.range.is_empty() {
-            self.current_token_range = token.range;
-        }
+        self.current_token_range = token.range;
 
         if self.current_token == LuaTokenKind::TkEof {
             return;
@@ -94,6 +92,11 @@ impl LuaDocParser<'_, '_> {
                 }
             }
             LuaDocLexerState::FieldStart | LuaDocLexerState::See | LuaDocLexerState::Source => {
+                while matches!(self.current_token, LuaTokenKind::TkWhitespace) {
+                    self.eat_current_and_lex_next();
+                }
+            }
+            LuaDocLexerState::CastExpr => {
                 while matches!(self.current_token, LuaTokenKind::TkWhitespace) {
                     self.eat_current_and_lex_next();
                 }
@@ -136,7 +139,10 @@ impl LuaDocParser<'_, '_> {
                         self.origin_token_index + 1
                     };
                 if next_origin_index >= self.tokens.len() {
-                    return LuaTokenData::new(LuaTokenKind::TkEof, SourceRange::EMPTY);
+                    return LuaTokenData::new(
+                        LuaTokenKind::TkEof,
+                        SourceRange::new(self.current_token_range.end_offset(), 0),
+                    );
                 }
 
                 let next_origin_token = self.tokens[next_origin_index];
@@ -169,10 +175,13 @@ impl LuaDocParser<'_, '_> {
         self.current_token_range
     }
 
-    pub fn current_token_text(&self) -> &str {
-        let source_text = self.lua_parser.origin_text();
+    pub fn current_token_text(&self) -> &'b str {
         let range = self.current_token_range;
-        &source_text[range.start_offset..range.end_offset()]
+        &self.origin_text()[range.start_offset..range.end_offset()]
+    }
+
+    pub fn origin_text(&self) -> &'b str {
+        self.lua_parser.origin_text()
     }
 
     pub fn set_state(&mut self, state: LuaDocLexerState) {
@@ -204,6 +213,11 @@ impl LuaDocParser<'_, '_> {
                     self.current_token = LuaTokenKind::TkDocTrivia;
                 }
             }
+            LuaDocLexerState::Normal => {
+                if self.lexer.state == LuaDocLexerState::CastExpr {
+                    self.re_calc_cast_type();
+                }
+            }
             _ => {}
         }
 
@@ -216,17 +230,42 @@ impl LuaDocParser<'_, '_> {
             return;
         }
         self.current_token = LuaTokenKind::None;
-        let readed_range = self.current_token_range;
+        let read_range = self.current_token_range;
         let origin_token_range = self.tokens[self.origin_token_index].range;
         let origin_token_kind = self.tokens[self.origin_token_index].kind;
         let new_range = SourceRange {
-            start_offset: readed_range.start_offset,
-            length: origin_token_range.end_offset() - readed_range.start_offset,
+            start_offset: read_range.start_offset,
+            length: origin_token_range.end_offset() - read_range.start_offset,
         };
 
         self.lexer.reset(origin_token_kind, new_range);
         self.lexer.state = LuaDocLexerState::Description;
         self.bump();
+    }
+
+    fn re_calc_cast_type(&mut self) {
+        if self.lexer.is_invalid() {
+            return;
+        }
+
+        // cast key 的解析是可以以`.`分割的, 但 `type` 不能以`.`分割必须视为一个整体, 因此我们需要回退
+        let read_range = self.current_token_range;
+        let origin_token_range = self.tokens[self.origin_token_index].range;
+        let origin_token_kind = self.tokens[self.origin_token_index].kind;
+        let new_range = SourceRange {
+            start_offset: read_range.start_offset,
+            length: origin_token_range.end_offset() - read_range.start_offset,
+        };
+        self.lexer.reset(origin_token_kind, new_range);
+
+        self.lexer.state = LuaDocLexerState::Normal;
+
+        let token = self.lex_token();
+        self.current_token = token.kind;
+
+        if !token.range.is_empty() {
+            self.current_token_range = token.range;
+        }
     }
 
     pub fn bump_to_end(&mut self) {

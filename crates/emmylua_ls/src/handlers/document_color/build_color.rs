@@ -1,4 +1,4 @@
-use code_analysis::LuaDocument;
+use emmylua_code_analysis::LuaDocument;
 use emmylua_parser::{LuaSyntaxNode, LuaSyntaxToken, LuaTokenKind};
 use lsp_types::{Color, ColorInformation};
 use rowan::{TextRange, TextSize};
@@ -51,8 +51,9 @@ fn try_build_color_information(
                 let color_text = &text[i..j];
                 if let Some(color) = parse_hex_color(color_text) {
                     let source_text_range = token.text_range();
+                    let start = if bytes[i - 1] == b'#' { i - 1 } else { i };
                     let text_range = TextRange::new(
-                        source_text_range.start() + TextSize::new(i as u32),
+                        source_text_range.start() + TextSize::new(start as u32),
                         source_text_range.start() + TextSize::new(j as u32),
                     );
                     let lsp_range = document.to_lsp_range(text_range)?;
@@ -110,9 +111,14 @@ pub fn convert_color_to_hex(color: Color, len: usize) -> String {
     let b = (color.blue * 255.0).round() as u8;
     match len {
         6 => format!("{:02X}{:02X}{:02X}", r, g, b),
+        7 => format!("#{:02X}{:02X}{:02X}", r, g, b),
         8 => {
             let a = (color.alpha * 255.0).round() as u8;
             format!("{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
+        }
+        9 => {
+            let a = (color.alpha * 255.0).round() as u8;
+            format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
         }
         _ => "".to_string(),
     }

@@ -16,6 +16,8 @@ pub struct StatusBar {
 pub enum ProgressTask {
     LoadWorkspace = 0,
     DiagnoseWorkspace = 1,
+    #[allow(dead_code)]
+    RefreshIndex = 2,
 }
 
 impl ProgressTask {
@@ -27,6 +29,7 @@ impl ProgressTask {
         match self {
             ProgressTask::LoadWorkspace => "Load workspace",
             ProgressTask::DiagnoseWorkspace => "Diagnose workspace",
+            ProgressTask::RefreshIndex => "Refresh index",
         }
     }
 }
@@ -40,6 +43,7 @@ impl StatusBar {
         match client_id {
             ClientId::VSCode => {
                 self.vscode_set_server_status("ok", true, task.get_task_name());
+                self.vscode_report_progress(&task.get_task_name(), 0.0);
             }
             _ => {
                 self.client.send_notification(
@@ -78,7 +82,10 @@ impl StatusBar {
                 if let Some(message) = message {
                     self.vscode_report_progress(&message, percentage.unwrap_or(0) as f64 / 100.0);
                 } else {
-                    self.vscode_report_progress(task.get_task_name(), percentage.unwrap_or(0) as f64);
+                    self.vscode_report_progress(
+                        task.get_task_name(),
+                        percentage.unwrap_or(0) as f64,
+                    );
                 }
             }
             _ => self.client.send_notification(

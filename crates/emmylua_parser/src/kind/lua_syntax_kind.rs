@@ -27,6 +27,7 @@ pub enum LuaSyntaxKind {
     GotoStat,
     CallExprStat,
     AssignStat,
+    GlobalStat,
     UnknownStat,
 
     // expressions
@@ -35,10 +36,15 @@ pub enum LuaSyntaxKind {
     ClosureExpr,
     UnaryExpr,
     BinaryExpr,
-    TableArrayExpr,  // { a, b, c}
-    TableObjectExpr, // { a = 1, b = 2, c = 3}
-    TableEmptyExpr,  // {}
-    CallExpr,
+    TableArrayExpr,       // { a, b, c}
+    TableObjectExpr,      // { a = 1, b = 2, c = 3}
+    TableEmptyExpr,       // {}
+    CallExpr,             // a()
+    RequireCallExpr,      // require('a')
+    ErrorCallExpr,        // error('a')
+    AssertCallExpr,       // assert(a)
+    TypeCallExpr,         // type(a)
+    SetmetatableCallExpr, // setmetatable(a, b)
     IndexExpr,
     NameExpr,
 
@@ -83,6 +89,9 @@ pub enum LuaSyntaxKind {
     DocTagUsing,
     DocTagSource,
     DocTagReadonly,
+    DocTagReturnCast,
+    DocTagExport,
+    DocTagLanguage,
 
     // doc Type
     TypeArray,          // baseType []
@@ -98,6 +107,7 @@ pub enum LuaSyntaxKind {
     TypeVariadic, // type...
     TypeNullable, // <Type>?
     TypeStringTemplate, // prefixName.`T`
+    TypeMultiLineUnion, // | simple type # description
 
     // follow donot support now
     TypeMatch,
@@ -109,6 +119,7 @@ pub enum LuaSyntaxKind {
     DocContinueOrField,
     // doc parameter
     DocTypedParameter,
+    DocNamedReturnType,
     DocGenericParameter,
     DocGenericDeclareList,
     DocDiagnosticNameList,
@@ -118,8 +129,7 @@ pub enum LuaSyntaxKind {
     DocMappedKeys,         // [p in KeyType]?
     DocEnumFieldList,      // ---| <EnumField>
     DocEnumField, // <string> # description or <integer> # description or <name> # description
-    DocAliasOrTypeList, // | <DocAliasOrType>
-    DocAliasOrType, // <type> # description
+    DocOneLineField, // <type> # description
     DocDiagnosticCodeList, // unused-local, undefined-global ...
     // start with '#' or '@'
     DocDescription,

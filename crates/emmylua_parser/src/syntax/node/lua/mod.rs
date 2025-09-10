@@ -1,13 +1,17 @@
 mod expr;
+mod path_trait;
 mod stat;
+mod test;
 
 use crate::{
+    LuaCommentOwner, LuaSyntaxNode,
     kind::{LuaSyntaxKind, LuaTokenKind},
     syntax::traits::{LuaAstChildren, LuaAstNode, LuaAstToken},
-    LuaSyntaxNode,
 };
 
 pub use expr::*;
+pub use path_trait::*;
+use rowan::TextRange;
 pub use stat::*;
 
 use super::{LuaLiteralToken, LuaNameToken, LuaNumberToken, LuaStringToken};
@@ -227,8 +231,7 @@ impl LuaAstNode for LuaTableField {
     where
         Self: Sized,
     {
-        kind == LuaSyntaxKind::TableFieldAssign.into()
-            || kind == LuaSyntaxKind::TableFieldValue.into()
+        kind == LuaSyntaxKind::TableFieldAssign || kind == LuaSyntaxKind::TableFieldValue
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
@@ -243,17 +246,33 @@ impl LuaAstNode for LuaTableField {
     }
 }
 
+impl LuaCommentOwner for LuaTableField {}
+
 impl LuaTableField {
+    /// TableFieldAssign: { a = "a" }
     pub fn is_assign_field(&self) -> bool {
         self.syntax().kind() == LuaSyntaxKind::TableFieldAssign.into()
     }
 
+    /// TableFieldValue: { "a" }
     pub fn is_value_field(&self) -> bool {
         self.syntax().kind() == LuaSyntaxKind::TableFieldValue.into()
     }
 
     pub fn get_field_key(&self) -> Option<LuaIndexKey> {
         if !self.is_assign_field() {
+            let parent_table = self.get_parent::<LuaTableExpr>()?;
+            let fields = parent_table.get_fields();
+            let mut idx = 1;
+            for field in fields {
+                if field.is_value_field() {
+                    if field.syntax() == self.syntax() {
+                        return Some(LuaIndexKey::Idx(idx));
+                    }
+                    idx += 1;
+                }
+            }
+
             return None;
         }
 
@@ -281,15 +300,13 @@ impl LuaTableField {
                     }
                     _ => return None,
                 }
-            } else {
-                if let Some(token) = child.as_token() {
-                    if token.kind() == LuaTokenKind::TkLeftBracket.into() {
-                        meet_left_bracket = true;
-                    } else if token.kind() == LuaTokenKind::TkName.into() {
-                        return Some(LuaIndexKey::Name(
-                            LuaNameToken::cast(token.clone()).unwrap(),
-                        ));
-                    }
+            } else if let Some(token) = child.as_token() {
+                if token.kind() == LuaTokenKind::TkLeftBracket.into() {
+                    meet_left_bracket = true;
+                } else if token.kind() == LuaTokenKind::TkName.into() {
+                    return Some(LuaIndexKey::Name(
+                        LuaNameToken::cast(token.clone()).unwrap(),
+                    ));
                 }
             }
         }
@@ -312,6 +329,7 @@ pub enum LuaIndexKey {
     String(LuaStringToken),
     Integer(LuaNumberToken),
     Expr(LuaExpr),
+    Idx(usize),
 }
 
 impl LuaIndexKey {
@@ -356,6 +374,32 @@ impl LuaIndexKey {
         match self {
             LuaIndexKey::Expr(expr) => Some(expr),
             _ => None,
+        }
+    }
+
+    pub fn get_path_part(&self) -> String {
+        match self {
+            LuaIndexKey::String(s) => s.get_value(),
+            LuaIndexKey::Name(name) => name.get_name_text().to_string(),
+            LuaIndexKey::Integer(i) => {
+                format!("[{}]", i.get_int_value())
+            }
+            LuaIndexKey::Expr(expr) => {
+                format!("[{}]", expr.syntax().text())
+            }
+            LuaIndexKey::Idx(i) => {
+                format!("[{}]", i)
+            }
+        }
+    }
+
+    pub fn get_range(&self) -> Option<TextRange> {
+        match self {
+            LuaIndexKey::Name(token) => Some(token.get_range()),
+            LuaIndexKey::String(token) => Some(token.get_range()),
+            LuaIndexKey::Integer(token) => Some(token.get_range()),
+            LuaIndexKey::Expr(expr) => Some(expr.syntax().text_range()),
+            LuaIndexKey::Idx(_) => None,
         }
     }
 }
@@ -431,5 +475,70 @@ impl LuaAstNode for LuaParamList {
 impl LuaParamList {
     pub fn get_params(&self) -> LuaAstChildren<LuaParamName> {
         self.children()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LuaIndexMemberExpr {
+    IndexExpr(LuaIndexExpr),
+    TableField(LuaTableField),
+}
+
+impl LuaAstNode for LuaIndexMemberExpr {
+    fn syntax(&self) -> &LuaSyntaxNode {
+        match self {
+            LuaIndexMemberExpr::IndexExpr(expr) => expr.syntax(),
+            LuaIndexMemberExpr::TableField(field) => field.syntax(),
+        }
+    }
+
+    fn can_cast(kind: LuaSyntaxKind) -> bool
+    where
+        Self: Sized,
+    {
+        LuaIndexExpr::can_cast(kind) || LuaTableField::can_cast(kind)
+    }
+
+    fn cast(syntax: LuaSyntaxNode) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        if LuaIndexExpr::can_cast(syntax.kind().into()) {
+            Some(Self::IndexExpr(LuaIndexExpr::cast(syntax).unwrap()))
+        } else if LuaTableField::can_cast(syntax.kind().into()) {
+            Some(Self::TableField(LuaTableField::cast(syntax).unwrap()))
+        } else {
+            None
+        }
+    }
+}
+
+impl LuaIndexMemberExpr {
+    pub fn get_index_expr(&self) -> Option<LuaIndexExpr> {
+        match self {
+            LuaIndexMemberExpr::IndexExpr(expr) => Some(expr.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_table_field(&self) -> Option<LuaTableField> {
+        match self {
+            LuaIndexMemberExpr::TableField(field) => Some(field.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_index_key(&self) -> Option<LuaIndexKey> {
+        match self {
+            LuaIndexMemberExpr::IndexExpr(expr) => expr.get_index_key(),
+            LuaIndexMemberExpr::TableField(field) => field.get_field_key(),
+        }
+    }
+
+    pub fn get_prefix_expr(&self) -> Option<LuaExpr> {
+        match self {
+            LuaIndexMemberExpr::IndexExpr(expr) => expr.get_prefix_expr(),
+            LuaIndexMemberExpr::TableField(field) => field.get_parent(),
+        }
     }
 }

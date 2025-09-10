@@ -1,14 +1,15 @@
 use crate::{
+    LuaAstToken, LuaIndexToken, LuaLiteralToken, LuaSyntaxNode, LuaSyntaxToken, LuaTokenKind,
     kind::LuaSyntaxKind,
     syntax::{
-        comment_trait::LuaCommentOwner,
         node::{LuaBinaryOpToken, LuaNameToken, LuaUnaryOpToken},
-        traits::{LuaAstChildren, LuaAstNode},
+        traits::{LuaAstChildren, LuaAstNode, LuaCommentOwner},
     },
-    LuaAstToken, LuaIndexToken, LuaLiteralToken, LuaSyntaxNode, LuaSyntaxToken, LuaTokenKind,
 };
 
-use super::{LuaBlock, LuaCallArgList, LuaIndexKey, LuaParamList, LuaTableField};
+use super::{
+    LuaBlock, LuaCallArgList, LuaIndexKey, LuaParamList, LuaTableField, path_trait::PathTrait,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LuaExpr {
@@ -42,20 +43,25 @@ impl LuaAstNode for LuaExpr {
     where
         Self: Sized,
     {
-        match kind {
-            LuaSyntaxKind::CallExpr => true,
-            LuaSyntaxKind::TableArrayExpr
-            | LuaSyntaxKind::TableObjectExpr
-            | LuaSyntaxKind::TableEmptyExpr => true,
-            LuaSyntaxKind::LiteralExpr => true,
-            LuaSyntaxKind::BinaryExpr => true,
-            LuaSyntaxKind::UnaryExpr => true,
-            LuaSyntaxKind::ClosureExpr => true,
-            LuaSyntaxKind::ParenExpr => true,
-            LuaSyntaxKind::NameExpr => true,
-            LuaSyntaxKind::IndexExpr => true,
-            _ => false,
-        }
+        matches!(
+            kind,
+            LuaSyntaxKind::CallExpr
+                | LuaSyntaxKind::AssertCallExpr
+                | LuaSyntaxKind::ErrorCallExpr
+                | LuaSyntaxKind::RequireCallExpr
+                | LuaSyntaxKind::TypeCallExpr
+                | LuaSyntaxKind::SetmetatableCallExpr
+                | LuaSyntaxKind::TableArrayExpr
+                | LuaSyntaxKind::TableObjectExpr
+                | LuaSyntaxKind::TableEmptyExpr
+                | LuaSyntaxKind::LiteralExpr
+                | LuaSyntaxKind::BinaryExpr
+                | LuaSyntaxKind::UnaryExpr
+                | LuaSyntaxKind::ClosureExpr
+                | LuaSyntaxKind::ParenExpr
+                | LuaSyntaxKind::NameExpr
+                | LuaSyntaxKind::IndexExpr
+        )
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
@@ -63,7 +69,14 @@ impl LuaAstNode for LuaExpr {
         Self: Sized,
     {
         match syntax.kind().into() {
-            LuaSyntaxKind::CallExpr => LuaCallExpr::cast(syntax).map(LuaExpr::CallExpr),
+            LuaSyntaxKind::CallExpr
+            | LuaSyntaxKind::AssertCallExpr
+            | LuaSyntaxKind::ErrorCallExpr
+            | LuaSyntaxKind::RequireCallExpr
+            | LuaSyntaxKind::TypeCallExpr
+            | LuaSyntaxKind::SetmetatableCallExpr => {
+                LuaCallExpr::cast(syntax).map(LuaExpr::CallExpr)
+            }
             LuaSyntaxKind::TableArrayExpr
             | LuaSyntaxKind::TableObjectExpr
             | LuaSyntaxKind::TableEmptyExpr => LuaTableExpr::cast(syntax).map(LuaExpr::TableExpr),
@@ -97,11 +110,7 @@ impl LuaAstNode for LuaVarExpr {
     where
         Self: Sized,
     {
-        match kind {
-            LuaSyntaxKind::NameExpr => true,
-            LuaSyntaxKind::IndexExpr => true,
-            _ => false,
-        }
+        matches!(kind, LuaSyntaxKind::NameExpr | LuaSyntaxKind::IndexExpr)
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
@@ -116,6 +125,15 @@ impl LuaAstNode for LuaVarExpr {
     }
 }
 
+impl LuaVarExpr {
+    pub fn to_expr(&self) -> LuaExpr {
+        match self {
+            LuaVarExpr::NameExpr(node) => LuaExpr::NameExpr(node.clone()),
+            LuaVarExpr::IndexExpr(node) => LuaExpr::IndexExpr(node.clone()),
+        }
+    }
+}
+
 impl From<LuaVarExpr> for LuaExpr {
     fn from(expr: LuaVarExpr) -> Self {
         match expr {
@@ -124,6 +142,8 @@ impl From<LuaVarExpr> for LuaExpr {
         }
     }
 }
+
+impl PathTrait for LuaVarExpr {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LuaSingleArgExpr {
@@ -143,13 +163,13 @@ impl LuaAstNode for LuaSingleArgExpr {
     where
         Self: Sized,
     {
-        match kind {
+        matches!(
+            kind,
             LuaSyntaxKind::TableArrayExpr
-            | LuaSyntaxKind::TableObjectExpr
-            | LuaSyntaxKind::TableEmptyExpr => true,
-            LuaSyntaxKind::LiteralExpr => true,
-            _ => false,
-        }
+                | LuaSyntaxKind::TableObjectExpr
+                | LuaSyntaxKind::TableEmptyExpr
+                | LuaSyntaxKind::LiteralExpr
+        )
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
@@ -221,6 +241,8 @@ impl LuaNameExpr {
     }
 }
 
+impl PathTrait for LuaNameExpr {}
+
 impl From<LuaNameExpr> for LuaVarExpr {
     fn from(expr: LuaNameExpr) -> Self {
         LuaVarExpr::NameExpr(expr)
@@ -290,15 +312,13 @@ impl LuaIndexExpr {
                     }
                     _ => return None,
                 }
-            } else {
-                if let Some(token) = child.as_token() {
-                    if token.kind() == LuaTokenKind::TkLeftBracket.into() {
-                        meet_left_bracket = true;
-                    } else if token.kind() == LuaTokenKind::TkName.into() {
-                        return Some(LuaIndexKey::Name(
-                            LuaNameToken::cast(token.clone()).unwrap(),
-                        ));
-                    }
+            } else if let Some(token) = child.as_token() {
+                if token.kind() == LuaTokenKind::TkLeftBracket.into() {
+                    meet_left_bracket = true;
+                } else if token.kind() == LuaTokenKind::TkName.into() {
+                    return Some(LuaIndexKey::Name(
+                        LuaNameToken::cast(token.clone()).unwrap(),
+                    ));
                 }
             }
         }
@@ -310,7 +330,13 @@ impl LuaIndexExpr {
         let index_token = self.get_index_token()?;
         index_token.syntax().next_token()
     }
+
+    pub fn get_name_token(&self) -> Option<LuaNameToken> {
+        self.token()
+    }
 }
+
+impl PathTrait for LuaIndexExpr {}
 
 impl From<LuaIndexExpr> for LuaVarExpr {
     fn from(expr: LuaIndexExpr) -> Self {
@@ -333,6 +359,11 @@ impl LuaAstNode for LuaCallExpr {
         Self: Sized,
     {
         kind == LuaSyntaxKind::CallExpr
+            || kind == LuaSyntaxKind::AssertCallExpr
+            || kind == LuaSyntaxKind::ErrorCallExpr
+            || kind == LuaSyntaxKind::RequireCallExpr
+            || kind == LuaSyntaxKind::TypeCallExpr
+            || kind == LuaSyntaxKind::SetmetatableCallExpr
     }
 
     fn cast(syntax: LuaSyntaxNode) -> Option<Self>
@@ -356,19 +387,46 @@ impl LuaCallExpr {
         self.child()
     }
 
-    pub fn is_colon_call(&self) -> bool {
-        let prefix = self.get_prefix_expr();
-        if let Some(prefix) = prefix {
-            if let LuaExpr::IndexExpr(index_expr) = prefix {
-                if let Some(index_token) = index_expr.get_index_token() {
-                    return index_token.is_colon();
-                }
-            }
-        }
+    pub fn get_args_count(&self) -> Option<usize> {
+        self.get_args_list().map(|it| it.get_args().count())
+    }
 
-        return false;
+    pub fn is_colon_call(&self) -> bool {
+        if let Some(index_token) = self.get_colon_token() {
+            return index_token.is_colon();
+        }
+        false
+    }
+
+    pub fn get_colon_token(&self) -> Option<LuaIndexToken> {
+        self.get_prefix_expr().and_then(|prefix| match prefix {
+            LuaExpr::IndexExpr(index_expr) => index_expr.get_index_token(),
+            _ => None,
+        })
+    }
+
+    pub fn is_require(&self) -> bool {
+        self.syntax().kind() == LuaSyntaxKind::RequireCallExpr.into()
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.syntax().kind() == LuaSyntaxKind::ErrorCallExpr.into()
+    }
+
+    pub fn is_assert(&self) -> bool {
+        self.syntax().kind() == LuaSyntaxKind::AssertCallExpr.into()
+    }
+
+    pub fn is_type(&self) -> bool {
+        self.syntax().kind() == LuaSyntaxKind::TypeCallExpr.into()
+    }
+
+    pub fn is_setmetatable(&self) -> bool {
+        self.syntax().kind() == LuaSyntaxKind::SetmetatableCallExpr.into()
     }
 }
+
+impl PathTrait for LuaCallExpr {}
 
 impl From<LuaCallExpr> for LuaExpr {
     fn from(expr: LuaCallExpr) -> Self {
@@ -525,6 +583,10 @@ impl LuaBinaryExpr {
 
     pub fn get_op_token(&self) -> Option<LuaBinaryOpToken> {
         self.token()
+    }
+
+    pub fn get_left_expr(&self) -> Option<LuaExpr> {
+        self.child()
     }
 }
 

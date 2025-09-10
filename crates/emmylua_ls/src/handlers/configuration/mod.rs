@@ -1,8 +1,8 @@
-use lsp_types::{
-    ClientCapabilities, DidChangeConfigurationParams, ServerCapabilities
-};
+use lsp_types::{ClientCapabilities, DidChangeConfigurationParams, ServerCapabilities};
 
 use crate::{context::ServerContextSnapshot, handlers::initialized::get_client_config};
+
+use super::RegisterCapabilities;
 
 pub async fn on_did_change_configuration(
     context: ServerContextSnapshot,
@@ -11,21 +11,37 @@ pub async fn on_did_change_configuration(
     let pretty_json = serde_json::to_string_pretty(&params).ok()?;
     log::info!("on_did_change_configuration: {}", pretty_json);
 
-    let config_manager = context.config_manager.read().await;
-    if config_manager.client_config.client_id.is_vscode() {
+    let workspace_manager = context.workspace_manager().read().await;
+    if !workspace_manager.is_workspace_initialized() {
         return Some(());
     }
-    let client_id = config_manager.client_config.client_id;
-    drop(config_manager);
 
-    let new_client_config = get_client_config(&context, client_id).await;
-    let mut config_manager = context.config_manager.write().await;
-    config_manager.client_config = new_client_config;
+    let client_id = workspace_manager.client_config.client_id;
+    if client_id.is_vscode() {
+        return Some(());
+    }
 
-    config_manager.reload_workspace().await;
+    drop(workspace_manager);
+
+    let supports_config_request = context
+        .client_capabilities()
+        .workspace
+        .as_ref()?
+        .configuration
+        .unwrap_or_default();
+
+    log::info!("change config client_id: {:?}", client_id);
+    let new_client_config = get_client_config(&context, client_id, supports_config_request).await;
+    let mut workspace_manager = context.workspace_manager().write().await;
+    workspace_manager.client_config = new_client_config;
+
+    log::info!("reloading workspace folders");
+    workspace_manager.reload_workspace().await;
     Some(())
 }
 
-pub fn register_capabilities(_: &mut ServerCapabilities, _: &ClientCapabilities) -> Option<()> {
-    Some(())
+pub struct ConfigurationCapabilities;
+
+impl RegisterCapabilities for ConfigurationCapabilities {
+    fn register_capabilities(_: &mut ServerCapabilities, _: &ClientCapabilities) {}
 }

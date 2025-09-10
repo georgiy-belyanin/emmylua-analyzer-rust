@@ -1,16 +1,16 @@
+use super::{
+    lua_doc_parser::LuaDocParser,
+    marker::{MarkEvent, MarkerEventContainer},
+    parser_config::ParserConfig,
+};
+use crate::text::Reader;
 use crate::{
+    LuaSyntaxTree, LuaTreeBuilder,
     grammar::parse_chunk,
     kind::LuaTokenKind,
     lexer::{LuaLexer, LuaTokenData},
     parser_error::LuaParseError,
     text::SourceRange,
-    LuaSyntaxTree, LuaTreeBuilder,
-};
-
-use super::{
-    lua_doc_parser::LuaDocParser,
-    marker::{MarkEvent, MarkerEventContainer},
-    parser_config::ParserConfig,
 };
 
 #[allow(unused)]
@@ -48,7 +48,8 @@ impl<'a> LuaParser<'a> {
     pub fn parse(text: &'a str, config: ParserConfig) -> LuaSyntaxTree {
         let mut errors: Vec<LuaParseError> = Vec::new();
         let tokens = {
-            let mut lexer = LuaLexer::new(text, config.lexer_config(), &mut errors);
+            let mut lexer =
+                LuaLexer::new(Reader::new(text), config.lexer_config(), Some(&mut errors));
             lexer.tokenize()
         };
 
@@ -113,10 +114,16 @@ impl<'a> LuaParser<'a> {
         self.tokens[self.token_index].range
     }
 
-    #[allow(unused)]
     pub fn current_token_text(&self) -> &str {
         let range = &self.tokens[self.token_index].range;
         &self.text[range.start_offset..range.end_offset()]
+    }
+
+    pub fn set_current_token_kind(&mut self, kind: LuaTokenKind) {
+        if self.token_index < self.tokens.len() {
+            self.tokens[self.token_index].kind = kind;
+            self.current_token = kind;
+        }
     }
 
     pub fn bump(&mut self) {
@@ -178,22 +185,22 @@ impl<'a> LuaParser<'a> {
             match token.kind {
                 LuaTokenKind::TkShortComment | LuaTokenKind::TkLongComment => {
                     line_count = 0;
-                    doc_tokens.push(token.clone());
+                    doc_tokens.push(*token);
                 }
                 LuaTokenKind::TkEndOfLine => {
                     line_count += 1;
 
-                    if doc_tokens.len() == 0 {
+                    if doc_tokens.is_empty() {
                         self.events.push(MarkEvent::EatToken {
                             kind: token.kind,
                             range: token.range,
                         });
                     } else {
-                        doc_tokens.push(token.clone());
+                        doc_tokens.push(*token);
                     }
 
                     // If there are two EOFs after the comment, the previous comment is considered a group of comments
-                    if line_count > 1 && doc_tokens.len() > 0 {
+                    if line_count > 1 && !doc_tokens.is_empty() {
                         self.parse_comments(&doc_tokens);
                         doc_tokens.clear();
                     }
@@ -226,17 +233,17 @@ impl<'a> LuaParser<'a> {
                     }
                 }
                 LuaTokenKind::TkShebang | LuaTokenKind::TkWhitespace => {
-                    if doc_tokens.len() == 0 {
+                    if doc_tokens.is_empty() {
                         self.events.push(MarkEvent::EatToken {
                             kind: token.kind,
                             range: token.range,
                         });
                     } else {
-                        doc_tokens.push(token.clone());
+                        doc_tokens.push(*token);
                     }
                 }
                 _ => {
-                    if doc_tokens.len() > 0 {
+                    if !doc_tokens.is_empty() {
                         self.parse_comments(&doc_tokens);
                         doc_tokens.clear();
                     }
@@ -244,7 +251,7 @@ impl<'a> LuaParser<'a> {
             }
         }
 
-        if doc_tokens.len() > 0 {
+        if !doc_tokens.is_empty() {
             self.parse_comments(&doc_tokens);
         }
     }
@@ -314,9 +321,10 @@ fn is_invalid_kind(kind: LuaTokenKind) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::text::Reader;
     use crate::{
-        kind::LuaTokenKind, lexer::LuaLexer, parser::ParserConfig, parser_error::LuaParseError,
-        LuaParser,
+        LuaParser, kind::LuaTokenKind, lexer::LuaLexer, parser::ParserConfig,
+        parser_error::LuaParseError,
     };
 
     #[allow(unused)]
@@ -327,7 +335,7 @@ mod tests {
         show_tokens: bool,
     ) -> LuaParser<'a> {
         let tokens = {
-            let mut lexer = LuaLexer::new(text, config.lexer_config(), errors);
+            let mut lexer = LuaLexer::new(Reader::new(text), config.lexer_config(), Some(errors));
             lexer.tokenize()
         };
 

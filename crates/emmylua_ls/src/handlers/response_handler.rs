@@ -6,7 +6,7 @@ use crate::context::ServerContext;
 
 pub async fn on_response_handler(
     response: Response,
-    server_context: &mut ServerContext,
+    server_context: &ServerContext,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
     server_context.send_response(response).await;
     Ok(())

@@ -1,9 +1,9 @@
 use rowan::GreenNode;
 
 use crate::{
-    parser_error::LuaParseError,
-    syntax::{node::LuaChunk, traits::LuaAstNode},
     LuaSyntaxNode,
+    parser_error::{LuaParseError, LuaParseErrorKind},
+    syntax::{node::LuaChunk, traits::LuaAstNode},
 };
 
 #[derive(Debug, Clone)]
@@ -30,5 +30,11 @@ impl LuaSyntaxTree {
 
     pub fn get_errors(&self) -> &[LuaParseError] {
         &self.errors
+    }
+
+    pub fn has_syntax_errors(&self) -> bool {
+        self.errors
+            .iter()
+            .any(|e| e.kind == LuaParseErrorKind::SyntaxError)
     }
 }

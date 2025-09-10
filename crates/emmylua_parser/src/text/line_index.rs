@@ -21,10 +21,8 @@ impl LineIndex {
                 line_offsets.push(TextSize::from(offset as u32));
                 line_only_ascii_vec.push(is_line_only_ascii);
                 is_line_only_ascii = true;
-            } else {
-                if !c.is_ascii() {
-                    is_line_only_ascii = false;
-                }
+            } else if !c.is_ascii() {
+                is_line_only_ascii = false;
             }
         }
 
@@ -128,6 +126,35 @@ impl LineIndex {
                 col -= 1;
             }
             Some(start_offset + TextSize::from(offset as u32))
+        }
+    }
+
+    pub fn get_col_offset_at_line(
+        &self,
+        line: usize,
+        col: usize,
+        source_text: &str,
+    ) -> Option<TextSize> {
+        let start_offset = self.get_line_offset(line)?;
+        if col == 0 {
+            return Some(0.into());
+        }
+
+        if self.is_line_only_ascii(line.try_into().unwrap()) {
+            let col = col.min(source_text.len());
+            Some(TextSize::from(col as u32))
+        } else {
+            let mut offset = 0;
+            let mut col = col;
+            for c in source_text[usize::from(start_offset)..].chars() {
+                if col == 0 {
+                    break;
+                }
+
+                offset += c.len_utf8();
+                col -= 1;
+            }
+            Some(TextSize::from(offset as u32))
         }
     }
 }

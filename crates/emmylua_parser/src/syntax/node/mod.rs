@@ -12,7 +12,7 @@ pub use token::*;
 
 use crate::kind::LuaSyntaxKind;
 
-use super::{traits::LuaAstNode, LuaSyntaxNode};
+use super::{LuaSyntaxNode, traits::LuaAstNode};
 
 #[allow(unused)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,6 +35,7 @@ pub enum LuaAst {
     LuaFuncStat(LuaFuncStat),
     LuaLocalFuncStat(LuaLocalFuncStat),
     LuaReturnStat(LuaReturnStat),
+    LuaGlobalStat(LuaGlobalStat),
 
     // exprs
     LuaNameExpr(LuaNameExpr),
@@ -85,6 +86,11 @@ pub enum LuaAst {
     LuaDocTagGeneric(LuaDocTagGeneric),
     LuaDocTagAsync(LuaDocTagAsync),
     LuaDocTagAs(LuaDocTagAs),
+    LuaDocTagReturnCast(LuaDocTagReturnCast),
+    LuaDocTagExport(LuaDocTagExport),
+    LuaDocTagLanguage(LuaDocTagLanguage),
+    // doc description
+    LuaDocDescription(LuaDocDescription),
 
     // doc type
     LuaDocNameType(LuaDocNameType),
@@ -100,7 +106,7 @@ pub enum LuaAst {
     LuaDocNullableType(LuaDocNullableType),
     LuaDocGenericType(LuaDocGenericType),
     LuaDocStrTplType(LuaDocStrTplType),
-
+    LuaDocMultiLineUnionType(LuaDocMultiLineUnionType),
     // other structure do not need enum here
 }
 
@@ -124,6 +130,7 @@ impl LuaAstNode for LuaAst {
             LuaAst::LuaFuncStat(node) => node.syntax(),
             LuaAst::LuaLocalFuncStat(node) => node.syntax(),
             LuaAst::LuaReturnStat(node) => node.syntax(),
+            LuaAst::LuaGlobalStat(node) => node.syntax(),
             LuaAst::LuaNameExpr(node) => node.syntax(),
             LuaAst::LuaIndexExpr(node) => node.syntax(),
             LuaAst::LuaTableExpr(node) => node.syntax(),
@@ -167,6 +174,10 @@ impl LuaAstNode for LuaAst {
             LuaAst::LuaDocTagGeneric(node) => node.syntax(),
             LuaAst::LuaDocTagAsync(node) => node.syntax(),
             LuaAst::LuaDocTagAs(node) => node.syntax(),
+            LuaAst::LuaDocTagReturnCast(node) => node.syntax(),
+            LuaAst::LuaDocTagExport(node) => node.syntax(),
+            LuaAst::LuaDocTagLanguage(node) => node.syntax(),
+            LuaAst::LuaDocDescription(node) => node.syntax(),
             LuaAst::LuaDocNameType(node) => node.syntax(),
             LuaAst::LuaDocArrayType(node) => node.syntax(),
             LuaAst::LuaDocFuncType(node) => node.syntax(),
@@ -180,6 +191,7 @@ impl LuaAstNode for LuaAst {
             LuaAst::LuaDocNullableType(node) => node.syntax(),
             LuaAst::LuaDocGenericType(node) => node.syntax(),
             LuaAst::LuaDocStrTplType(node) => node.syntax(),
+            LuaAst::LuaDocMultiLineUnionType(node) => node.syntax(),
         }
     }
 
@@ -205,6 +217,7 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::FuncStat => true,
             LuaSyntaxKind::LocalFuncStat => true,
             LuaSyntaxKind::ReturnStat => true,
+            LuaSyntaxKind::GlobalStat => true,
             LuaSyntaxKind::NameExpr => true,
             LuaSyntaxKind::IndexExpr => true,
             LuaSyntaxKind::TableEmptyExpr
@@ -213,7 +226,12 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::BinaryExpr => true,
             LuaSyntaxKind::UnaryExpr => true,
             LuaSyntaxKind::ParenExpr => true,
-            LuaSyntaxKind::CallExpr => true,
+            LuaSyntaxKind::CallExpr
+            | LuaSyntaxKind::AssertCallExpr
+            | LuaSyntaxKind::ErrorCallExpr
+            | LuaSyntaxKind::RequireCallExpr
+            | LuaSyntaxKind::TypeCallExpr
+            | LuaSyntaxKind::SetmetatableCallExpr => true,
             LuaSyntaxKind::LiteralExpr => true,
             LuaSyntaxKind::ClosureExpr => true,
             LuaSyntaxKind::ParamList => true,
@@ -250,6 +268,9 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::DocTagGeneric => true,
             LuaSyntaxKind::DocTagAsync => true,
             LuaSyntaxKind::DocTagAs => true,
+            LuaSyntaxKind::DocTagReturnCast => true,
+            LuaSyntaxKind::DocTagExport => true,
+            LuaSyntaxKind::DocTagLanguage => true,
             LuaSyntaxKind::TypeName => true,
             LuaSyntaxKind::TypeArray => true,
             LuaSyntaxKind::TypeFun => true,
@@ -263,6 +284,7 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::TypeNullable => true,
             LuaSyntaxKind::TypeGeneric => true,
             LuaSyntaxKind::TypeStringTemplate => true,
+            LuaSyntaxKind::TypeMultiLineUnion => true,
             _ => false,
         }
     }
@@ -295,6 +317,7 @@ impl LuaAstNode for LuaAst {
                 LuaLocalFuncStat::cast(syntax).map(LuaAst::LuaLocalFuncStat)
             }
             LuaSyntaxKind::ReturnStat => LuaReturnStat::cast(syntax).map(LuaAst::LuaReturnStat),
+            LuaSyntaxKind::GlobalStat => LuaGlobalStat::cast(syntax).map(LuaAst::LuaGlobalStat),
             LuaSyntaxKind::NameExpr => LuaNameExpr::cast(syntax).map(LuaAst::LuaNameExpr),
             LuaSyntaxKind::IndexExpr => LuaIndexExpr::cast(syntax).map(LuaAst::LuaIndexExpr),
             LuaSyntaxKind::TableEmptyExpr
@@ -305,7 +328,14 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::BinaryExpr => LuaBinaryExpr::cast(syntax).map(LuaAst::LuaBinaryExpr),
             LuaSyntaxKind::UnaryExpr => LuaUnaryExpr::cast(syntax).map(LuaAst::LuaUnaryExpr),
             LuaSyntaxKind::ParenExpr => LuaParenExpr::cast(syntax).map(LuaAst::LuaParenExpr),
-            LuaSyntaxKind::CallExpr => LuaCallExpr::cast(syntax).map(LuaAst::LuaCallExpr),
+            LuaSyntaxKind::CallExpr
+            | LuaSyntaxKind::AssertCallExpr
+            | LuaSyntaxKind::ErrorCallExpr
+            | LuaSyntaxKind::RequireCallExpr
+            | LuaSyntaxKind::TypeCallExpr
+            | LuaSyntaxKind::SetmetatableCallExpr => {
+                LuaCallExpr::cast(syntax).map(LuaAst::LuaCallExpr)
+            }
             LuaSyntaxKind::LiteralExpr => LuaLiteralExpr::cast(syntax).map(LuaAst::LuaLiteralExpr),
             LuaSyntaxKind::ClosureExpr => LuaClosureExpr::cast(syntax).map(LuaAst::LuaClosureExpr),
             LuaSyntaxKind::Comment => LuaComment::cast(syntax).map(LuaAst::LuaComment),
@@ -316,7 +346,9 @@ impl LuaAstNode for LuaAst {
             LuaSyntaxKind::ParamName => LuaParamName::cast(syntax).map(LuaAst::LuaParamName),
             LuaSyntaxKind::CallArgList => LuaCallArgList::cast(syntax).map(LuaAst::LuaCallArgList),
             LuaSyntaxKind::LocalName => LuaLocalName::cast(syntax).map(LuaAst::LuaLocalName),
-            LuaSyntaxKind::Attribute => LuaLocalAttribute::cast(syntax).map(LuaAst::LuaLocalAttribute),
+            LuaSyntaxKind::Attribute => {
+                LuaLocalAttribute::cast(syntax).map(LuaAst::LuaLocalAttribute)
+            }
             LuaSyntaxKind::ElseIfClauseStat => {
                 LuaElseIfClauseStat::cast(syntax).map(LuaAst::LuaElseIfClauseStat)
             }
@@ -372,6 +404,18 @@ impl LuaAstNode for LuaAst {
             }
             LuaSyntaxKind::DocTagAsync => LuaDocTagAsync::cast(syntax).map(LuaAst::LuaDocTagAsync),
             LuaSyntaxKind::DocTagAs => LuaDocTagAs::cast(syntax).map(LuaAst::LuaDocTagAs),
+            LuaSyntaxKind::DocTagReturnCast => {
+                LuaDocTagReturnCast::cast(syntax).map(LuaAst::LuaDocTagReturnCast)
+            }
+            LuaSyntaxKind::DocTagExport => {
+                LuaDocTagExport::cast(syntax).map(LuaAst::LuaDocTagExport)
+            }
+            LuaSyntaxKind::DocTagLanguage => {
+                LuaDocTagLanguage::cast(syntax).map(LuaAst::LuaDocTagLanguage)
+            }
+            LuaSyntaxKind::DocDescription => {
+                LuaDocDescription::cast(syntax).map(LuaAst::LuaDocDescription)
+            }
             LuaSyntaxKind::TypeName => LuaDocNameType::cast(syntax).map(LuaAst::LuaDocNameType),
             LuaSyntaxKind::TypeArray => LuaDocArrayType::cast(syntax).map(LuaAst::LuaDocArrayType),
             LuaSyntaxKind::TypeFun => LuaDocFuncType::cast(syntax).map(LuaAst::LuaDocFuncType),
@@ -400,6 +444,9 @@ impl LuaAstNode for LuaAst {
             }
             LuaSyntaxKind::TypeStringTemplate => {
                 LuaDocStrTplType::cast(syntax).map(LuaAst::LuaDocStrTplType)
+            }
+            LuaSyntaxKind::TypeMultiLineUnion => {
+                LuaDocMultiLineUnionType::cast(syntax).map(LuaAst::LuaDocMultiLineUnionType)
             }
             _ => None,
         }

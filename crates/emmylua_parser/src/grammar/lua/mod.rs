@@ -23,7 +23,7 @@ pub fn parse_chunk(p: &mut LuaParser) {
         if p.current_token_index() == consume_count {
             let m = p.mark(LuaSyntaxKind::UnknownStat);
             p.bump();
-            p.push_error(LuaParseError::from_source_range(
+            p.push_error(LuaParseError::syntax_error_from(
                 &t!("unexpected token"),
                 p.current_token_range(),
             ));
@@ -48,8 +48,12 @@ fn expect_token(p: &mut LuaParser, token: LuaTokenKind) -> Result<(), LuaParseEr
         p.bump();
         Ok(())
     } else {
-        Err(LuaParseError::from_source_range(
-            &t!("expected %{token}, but get %{current}", token = token, current = p.current_token()),
+        Err(LuaParseError::syntax_error_from(
+            &t!(
+                "expected %{token}, but get %{current}",
+                token = token,
+                current = p.current_token()
+            ),
             p.current_token_range(),
         ))
     }

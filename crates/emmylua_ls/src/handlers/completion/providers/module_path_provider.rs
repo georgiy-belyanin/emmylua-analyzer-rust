@@ -1,10 +1,12 @@
-use code_analysis::Emmyrc;
-use emmylua_parser::{
-    LuaAstNode, LuaAstToken, LuaCallArgList, LuaCallExpr, LuaExpr, LuaLiteralExpr, LuaStringToken,
+use crate::handlers::completion::{
+    completion_builder::CompletionBuilder, completion_data::CompletionData,
 };
-use lsp_types::CompletionItem;
+use emmylua_parser::{
+    LuaAstNode, LuaAstToken, LuaCallArgList, LuaCallExpr, LuaLiteralExpr, LuaStringToken,
+};
+use lsp_types::{CompletionItem, CompletionTextEdit, TextEdit};
 
-use crate::handlers::completion::completion_builder::CompletionBuilder;
+use super::get_text_edit_range_in_string;
 
 pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     if builder.is_cancelled() {
@@ -12,25 +14,32 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     }
 
     let string_token = LuaStringToken::cast(builder.trigger_token.clone())?;
-    let call_expr_prefix = string_token
+    let call_expr = string_token
         .get_parent::<LuaLiteralExpr>()?
         .get_parent::<LuaCallArgList>()?
-        .get_parent::<LuaCallExpr>()?
-        .get_prefix_expr()?;
+        .get_parent::<LuaCallExpr>()?;
 
-    let emmyrc = builder.semantic_model.get_emmyrc();
-    match call_expr_prefix {
-        LuaExpr::NameExpr(name_expr) => {
-            let name = name_expr.get_name_text()?;
-            if !is_require_call(emmyrc, &name) {
-                return None;
-            }
-        }
-        _ => return None,
+    if !call_expr.is_require() {
+        return None;
     }
 
-    let version_number = emmyrc.runtime.version.to_lua_version_number();
-    let prefix_content = string_token.get_value();
+    let text_edit_range = get_text_edit_range_in_string(builder, string_token.clone())?;
+    add_modules(builder, &string_token.get_value(), Some(text_edit_range));
+    builder.stop_here();
+    Some(())
+}
+
+pub fn add_modules(
+    builder: &mut CompletionBuilder,
+    prefix_content: &str,
+    text_edit_range: Option<lsp_types::Range>,
+) -> Option<()> {
+    let version_number = builder
+        .semantic_model
+        .get_emmyrc()
+        .runtime
+        .version
+        .to_lua_version_number();
     let parts: Vec<&str> = prefix_content
         .split(|c| c == '.' || c == '/' || c == '\\')
         .collect();
@@ -53,17 +62,30 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     let module_info = db.get_module_index().find_module_node(&module_path)?;
     for (name, module_id) in &module_info.children {
         let child_module_node = db.get_module_index().get_module_node(module_id)?;
+        let filter_text = format!("{}{}", prefix, name);
+        let text_edit = text_edit_range.map(|text_edit_range| {
+            CompletionTextEdit::Edit(TextEdit {
+                range: text_edit_range.clone(),
+                new_text: filter_text.clone(),
+            })
+        });
         if let Some(child_file_id) = child_module_node.file_ids.first() {
             let child_module_info = db.get_module_index().get_module(*child_file_id)?;
-            if  child_module_info.is_visible(&version_number) {
+            let data = if let Some(property_id) = &child_module_info.semantic_id {
+                CompletionData::from_property_owner_id(builder, property_id.clone(), None)
+            } else {
+                None
+            };
+
+            if child_module_info.is_visible(&version_number) {
                 let uri = db.get_vfs().get_uri(child_file_id)?;
-                let filter_text = format!("{}{}", prefix, name);
                 let completion_item = CompletionItem {
                     label: name.clone(),
                     kind: Some(lsp_types::CompletionItemKind::FILE),
                     filter_text: Some(filter_text.clone()),
-                    insert_text: Some(filter_text),
+                    text_edit,
                     detail: Some(uri.to_string()),
+                    data,
                     ..Default::default()
                 };
                 module_completions.push(completion_item);
@@ -72,8 +94,8 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
             let completion_item = CompletionItem {
                 label: name.clone(),
                 kind: Some(lsp_types::CompletionItemKind::FOLDER),
-                filter_text: Some(name.clone()),
-                insert_text: Some(name.clone()),
+                filter_text: Some(filter_text.clone()),
+                text_edit,
                 ..Default::default()
             };
 
@@ -85,17 +107,6 @@ pub fn add_completion(builder: &mut CompletionBuilder) -> Option<()> {
     for completion_item in module_completions {
         builder.add_completion_item(completion_item)?;
     }
-    builder.stop_here();
 
     Some(())
-}
-
-fn is_require_call(emmyrc: &Emmyrc, name: &str) -> bool {
-    for fun in &emmyrc.runtime.require_like_function {
-        if name == fun {
-            return true;
-        }
-    }
-
-    name == "require"
 }
